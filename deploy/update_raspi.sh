@@ -65,8 +65,17 @@ if ! id "$RUN_USER" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[1/5] Atualizando codigo (git pull)..."
-sudo -u "$RUN_USER" git -C "$INSTALL_DIR" pull --ff-only
+HAS_GIT=0
+if [[ -d "$INSTALL_DIR/.git" ]]; then
+  HAS_GIT=1
+fi
+
+if [[ "$HAS_GIT" -eq 1 ]]; then
+  echo "[1/5] Atualizando codigo (git pull)..."
+  sudo -u "$RUN_USER" git -C "$INSTALL_DIR" pull --ff-only
+else
+  echo "[1/5] Repositorio sem .git; pulando git pull."
+fi
 
 echo "[2/5] Instalando/atualizando dependencias Python..."
 if [[ -x "$INSTALL_DIR/.venv/bin/pip" ]]; then

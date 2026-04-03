@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import threading
 import time
 from pathlib import Path
@@ -41,6 +42,42 @@ def _resolve_device(device: str) -> int | str:
     if raw.isdigit():
         return int(raw)
     return raw
+
+
+def _center(box: tuple[int, int, int, int]) -> tuple[float, float]:
+    x, y, w, h = box
+    return (x + (w / 2.0), y + (h / 2.0))
+
+
+def _assign_face_ids(
+    face_boxes: list[tuple[int, int, int, int]],
+    prev_tracks: list[dict[str, float]],
+    next_id: int,
+    max_dist: float,
+) -> tuple[list[dict[str, float]], int]:
+    """Assign stable short IDs to faces by nearest centroid matching."""
+    used_prev: set[int] = set()
+    assigned: list[dict[str, float]] = []
+    for box in face_boxes:
+        cx, cy = _center(box)
+        best_idx = -1
+        best_dist = max_dist
+        for idx, tr in enumerate(prev_tracks):
+            if idx in used_prev:
+                continue
+            dist = math.hypot(cx - float(tr["cx"]), cy - float(tr["cy"]))
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = idx
+        if best_idx >= 0:
+            used_prev.add(best_idx)
+            face_id = int(prev_tracks[best_idx]["id"])
+        else:
+            face_id = next_id
+            next_id += 1
+        x, y, w, h = box
+        assigned.append({"id": face_id, "cx": cx, "cy": cy, "x": x, "y": y, "w": w, "h": h})
+    return assigned, next_id
 
 
 def _capture_loop(
@@ -98,6 +135,8 @@ def _capture_loop(
         )
 
     min_interval = 1.0 / max(1, min(30, int(fps)))
+    next_face_id = 1
+    tracks: list[dict[str, float]] = []
     try:
         while not _STOP_EVENT.is_set():
             ok, frame = cap.read()
@@ -117,8 +156,34 @@ def _capture_loop(
                     minSize=(40, 40),
                 )
                 faces_count = len(faces)
-                for (x, y, w, h) in faces:
+                frame_w = int(frame.shape[1])
+                max_dist = max(40.0, frame_w * 0.08)
+                boxes = [
+                    (int(x), int(y), int(w), int(h))
+                    for (x, y, w, h) in faces
+                ]
+                tracks, next_face_id = _assign_face_ids(
+                    boxes, tracks, next_face_id, max_dist
+                )
+                for tr in tracks:
+                    x = int(tr["x"])
+                    y = int(tr["y"])
+                    w = int(tr["w"])
+                    h = int(tr["h"])
+                    face_id = int(tr["id"])
                     cv2.rectangle(frame, (x, y), (x + w, y + h), (30, 190, 255), 2)
+                    cv2.putText(
+                        frame,
+                        f"ID-{face_id}",
+                        (x, max(0, y - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (30, 190, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+            else:
+                tracks = []
 
             ok_jpg, encoded = cv2.imencode(
                 ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82]

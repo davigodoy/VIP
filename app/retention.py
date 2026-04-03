@@ -102,13 +102,13 @@ def load_config() -> RetentionConfig:
         contagem_continua_enabled=_to_bool(
             raw.get(
                 "contagem_continua_enabled",
-                raw.get("contagem_modo_sempre_ativa", "1"),
+                raw.get("contagem_modo_sempre_ativa", raw.get("fallback_counting_enabled", "1")),
             )
         ),
         contagem_intervalo_min=int(
             raw.get(
                 "contagem_intervalo_min",
-                raw.get("always_on_bucket_min", "120"),
+                raw.get("fallback_interval_min", "120"),
             )
         ),
         culto_antecedencia_min=int(_raw_or_default("culto_antecedencia_min")),
@@ -829,6 +829,10 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _is_git_repo(path: Path) -> bool:
+    return (path / ".git").exists()
+
+
 def _run_command(
     cmd: list[str], *, cwd: Path, timeout: int = 120
 ) -> tuple[bool, str]:
@@ -850,6 +854,16 @@ def _run_command(
 
 def _collect_git_update_info(*, refresh_remote: bool) -> dict[str, Any]:
     cwd = _repo_root()
+    if not _is_git_repo(cwd):
+        return {
+            "branch": "",
+            "local_commit": "",
+            "remote_commit": "",
+            "ahead_count": 0,
+            "behind_count": 0,
+            "fetch_error": "",
+            "is_git_repo": False,
+        }
     branch = ""
     local_commit = ""
     remote_commit = ""
@@ -900,6 +914,7 @@ def _collect_git_update_info(*, refresh_remote: bool) -> dict[str, Any]:
         "ahead_count": ahead,
         "behind_count": behind,
         "fetch_error": fetch_error,
+        "is_git_repo": True,
     }
 
 
@@ -1063,6 +1078,7 @@ def get_update_status(*, refresh_remote: bool = False) -> dict[str, Any]:
         "remote_commit_short": (git_info["remote_commit"] or "")[:8],
         "ahead_count": int(git_info["ahead_count"] or 0),
         "behind_count": int(git_info["behind_count"] or 0),
+        "git_repository": bool(git_info.get("is_git_repo", False)),
         "last_run_ts": last_run_ts,
         "last_status": last_status,
         "last_message": last_message,
@@ -1133,10 +1149,19 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
     pull_cmd = ["git", "pull", "--ff-only", "origin", branch] if branch and branch != "HEAD" else ["git", "pull", "--ff-only"]
     fetch_cmd = ["git", "fetch", "origin", branch] if branch and branch != "HEAD" else ["git", "fetch", "origin"]
 
-    steps: list[tuple[str, list[str], int, bool]] = [
-        ("git_fetch", fetch_cmd, 10, False),
-        ("git_pull", pull_cmd, 30, False),
-    ]
+    warnings: list[str] = []
+    steps: list[tuple[str, list[str], int, bool]] = []
+    if git_info.get("is_git_repo", False):
+        steps.extend(
+            [
+                ("git_fetch", fetch_cmd, 10, False),
+                ("git_pull", pull_cmd, 30, False),
+            ]
+        )
+    else:
+        warnings.append(
+            "Repositorio sem .git: passos git_fetch/git_pull foram ignorados."
+        )
     if (repo / "requirements.txt").exists():
         steps.append(("pip_install", pip_exec_cmd, 55, False))
     steps.extend(
@@ -1148,7 +1173,6 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
         ]
     )
 
-    warnings: list[str] = []
     try:
         _set_update_state(
             run_id=run_id,
@@ -1374,7 +1398,7 @@ def _resolve_fallback_interval_culto_id(event_ts: datetime, config: RetentionCon
     ts_epoch = int(event_ts.timestamp())
     bucket_start_epoch = ts_epoch - (ts_epoch % bucket_sec)
     bucket_start = datetime.fromtimestamp(bucket_start_epoch, event_ts.tzinfo)
-    return f"auto_{bucket_start:%Y%m%d_%H%M}"
+    return f"interval_{bucket_start:%Y%m%d_%H%M}"
 
 
 def _resolve_service_for_event(

@@ -104,7 +104,8 @@ sudo bash deploy/update_raspi.sh --install-dir /opt/vip --user pi
 ```
 
 Fluxo executado:
-- `git pull --ff-only`
+- se existir `.git`: `git pull --ff-only`
+- sem `.git` (instalacao via copia/rsync): segue sem pull, com aviso
 - atualizacao de dependencias Python
 - validacao basica com `compileall`
 - `init_db()` para aplicar migracoes
@@ -173,6 +174,8 @@ sudo systemctl status vip-dashboard.service
     - `faces` (`0|1`): habilita/desabilita overlay de deteccao facial
     - `width` (opcional)
     - `height` (opcional)
+  - quando `faces=1`, o overlay mostra caixas com IDs temporarios (`ID-1`, `ID-2`, ...)
+    para facilitar acompanhamento visual entre frames
 - `GET /api/camera/preview/status`
   - retorna status atual do preview (running, fps, faces, erro, etc.)
 - `GET /api/camera/preview`

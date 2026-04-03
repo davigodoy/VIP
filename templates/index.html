@@ -173,14 +173,6 @@
             <label>FPS de processamento<input type="number" name="camera_fps" min="1" max="60" value="{{ config.camera_fps }}" required /></label>
             <label>Janela inicio do culto (min antes)<input type="number" name="culto_antecedencia_min" min="0" max="180" value="{{ config.culto_antecedencia_min }}" required /></label>
             <label>Duracao da janela do culto (min)<input type="number" name="culto_duracao_min" min="30" max="360" value="{{ config.culto_duracao_min }}" required /></label>
-            <label class="checkbox">
-              <input type="checkbox" name="fallback_counting_enabled" {% if config.fallback_counting_enabled %}checked{% endif %} />
-              Contagem continua quando nao houver culto ativo
-            </label>
-            <label>
-              Intervalo agrupamento fallback (min)
-              <input type="number" name="fallback_interval_min" min="5" max="240" value="{{ config.fallback_interval_min }}" required />
-            </label>
           </div>
         </section>
 
