@@ -25,6 +25,9 @@ Escopo funcional:
   - dispositivo (ex.: `/dev/video0`), nome, resolucao de inferencia e FPS
   - preview ao vivo no painel (MJPEG)
   - opcao de overlay com deteccao facial (caixas em tempo real)
+- Operacao continua (fallback):
+  - opcionalmente, quando nao houver culto ativo, o sistema pode agrupar eventos
+    automaticamente em blocos de tempo (ex.: 30/60 min)
 - Dashboard em tempo real:
   - entradas, saidas, retornos, unicos, ocupacao atual e pico
   - graficos de fluxo, ocupacao, faixa etaria e genero
@@ -152,6 +155,15 @@ sudo systemctl status vip-dashboard.service
 
 - `GET /api/metrics/live`
 - `GET /api/metrics/charts`
+
+### Operacao sem agenda ativa
+
+- Com `contagem_continua_enabled` habilitado no painel, o ingest continua ativo mesmo sem
+  culto cadastrado/ativo.
+- Nesse modo, os eventos sao associados automaticamente a um `culto_id` tecnico por
+  intervalo configurado (`contagem_intervalo_min`), por exemplo:
+  - `interval_20260401_0900` (bloco iniciado as 09:00)
+  - `interval_20260401_1000` (bloco iniciado as 10:00)
 
 ### Preview de camera
 

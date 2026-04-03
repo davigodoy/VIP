@@ -25,6 +25,8 @@ class RetentionConfig(BaseModel):
     camera_inference_width: int = Field(ge=160, le=1920)
     camera_inference_height: int = Field(ge=120, le=1080)
     camera_fps: int = Field(ge=1, le=60)
+    contagem_continua_enabled: bool = True
+    contagem_intervalo_min: int = Field(ge=5, le=240)
     culto_antecedencia_min: int = Field(ge=0, le=180)
     culto_duracao_min: int = Field(ge=30, le=360)
     estimar_faixa_etaria: bool

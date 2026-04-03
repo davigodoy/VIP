@@ -19,6 +19,7 @@
         <a href="#sec-config-etaria">Faixas etarias</a>
         <a href="#sec-config-sync">Planilha online</a>
         <a href="#sec-config-retencao">Retencao</a>
+        <a href="#sec-config-operacao">Operacao continua</a>
         <a href="#sec-update">Atualizacoes</a>
         <a href="#sec-operacional">Operacional</a>
         <a href="#sec-conciliacao">Conciliacao</a>
@@ -172,6 +173,14 @@
             <label>FPS de processamento<input type="number" name="camera_fps" min="1" max="60" value="{{ config.camera_fps }}" required /></label>
             <label>Janela inicio do culto (min antes)<input type="number" name="culto_antecedencia_min" min="0" max="180" value="{{ config.culto_antecedencia_min }}" required /></label>
             <label>Duracao da janela do culto (min)<input type="number" name="culto_duracao_min" min="30" max="360" value="{{ config.culto_duracao_min }}" required /></label>
+            <label class="checkbox">
+              <input type="checkbox" name="fallback_counting_enabled" {% if config.fallback_counting_enabled %}checked{% endif %} />
+              Contagem continua quando nao houver culto ativo
+            </label>
+            <label>
+              Intervalo agrupamento fallback (min)
+              <input type="number" name="fallback_interval_min" min="5" max="240" value="{{ config.fallback_interval_min }}" required />
+            </label>
           </div>
         </section>
 
@@ -222,10 +231,28 @@
             <label>Hora limpeza automatica (0-23)<input type="number" name="auto_cleanup_hour" min="0" max="23" value="{{ config.auto_cleanup_hour }}" required /></label>
             <label class="checkbox"><input type="checkbox" name="auto_cleanup_enabled" {% if config.auto_cleanup_enabled %}checked{% endif %} />Habilitar limpeza automatica diaria</label>
           </div>
-          <div class="actions">
-            <button type="submit">Salvar configuracao</button>
-          </div>
         </section>
+
+        <section id="sec-config-operacao" class="card">
+          <h2>Operacao continua</h2>
+          <div class="grid">
+            <label class="checkbox">
+              <input type="checkbox" name="contagem_continua_enabled" {% if config.contagem_continua_enabled %}checked{% endif %} />
+              Contagem sempre ativa (fora de cultos cadastrados)
+            </label>
+            <label>
+              Intervalo automatico (min)
+              <input type="number" name="contagem_intervalo_min" min="5" max="240" value="{{ config.contagem_intervalo_min }}" required />
+            </label>
+          </div>
+          <p class="help">
+            Quando habilitado, eventos fora de janelas de culto sao agrupados em blocos tecnicos por intervalo.
+          </p>
+        </section>
+
+        <div class="actions">
+          <button type="submit">Salvar configuracao</button>
+        </div>
       </form>
 
       <section id="sec-update" class="card">

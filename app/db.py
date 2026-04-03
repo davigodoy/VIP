@@ -27,6 +27,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "camera_fps": 8,
     "culto_antecedencia_min": 30,
     "culto_duracao_min": 150,
+    "contagem_modo_sempre_ativa": 1,
+    "contagem_intervalo_min": 120,
     "estimar_faixa_etaria": 1,
     "estimar_genero": 1,
     "sync_google_sheets_enabled": 0,
@@ -260,6 +262,18 @@ def init_db() -> None:
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
+    cfg_keys = {
+        row["key"] for row in conn.execute("SELECT key FROM config").fetchall()
+    }
+    if "contagem_modo_sempre_ativa" not in cfg_keys:
+        conn.execute(
+            "INSERT INTO config (key, value) VALUES ('contagem_modo_sempre_ativa', '1')"
+        )
+    if "contagem_intervalo_min" not in cfg_keys:
+        conn.execute(
+            "INSERT INTO config (key, value) VALUES ('contagem_intervalo_min', '120')"
+        )
+
     event_cols = {
         row["name"] for row in conn.execute("PRAGMA table_info(events)").fetchall()
     }

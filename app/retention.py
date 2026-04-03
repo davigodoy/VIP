@@ -58,6 +58,8 @@ def load_config() -> RetentionConfig:
         sync_credentials_env_var="VIP_GSHEETS_CREDENTIALS_JSON",
         sync_credentials_file_path="",
         sync_credentials_json="",
+        contagem_continua_enabled=True,
+        contagem_intervalo_min=120,
         idade_limite_crianca=11,
         idade_limite_junior=14,
         idade_limite_adolescente=17,
@@ -97,6 +99,18 @@ def load_config() -> RetentionConfig:
         camera_inference_width=int(_raw_or_default("camera_inference_width")),
         camera_inference_height=int(_raw_or_default("camera_inference_height")),
         camera_fps=int(_raw_or_default("camera_fps")),
+        contagem_continua_enabled=_to_bool(
+            raw.get(
+                "contagem_continua_enabled",
+                raw.get("contagem_modo_sempre_ativa", "1"),
+            )
+        ),
+        contagem_intervalo_min=int(
+            raw.get(
+                "contagem_intervalo_min",
+                raw.get("always_on_bucket_min", "120"),
+            )
+        ),
         culto_antecedencia_min=int(_raw_or_default("culto_antecedencia_min")),
         culto_duracao_min=int(_raw_or_default("culto_duracao_min")),
         estimar_faixa_etaria=_to_bool(_raw_or_default("estimar_faixa_etaria")),
@@ -1353,15 +1367,32 @@ def _resolve_age_band_from_estimate(
     return "idoso"
 
 
+def _resolve_fallback_interval_culto_id(event_ts: datetime, config: RetentionConfig) -> str:
+    """Build a deterministic culto_id for always-on interval buckets."""
+    interval_min = max(5, int(config.contagem_intervalo_min))
+    bucket_sec = interval_min * 60
+    ts_epoch = int(event_ts.timestamp())
+    bucket_start_epoch = ts_epoch - (ts_epoch % bucket_sec)
+    bucket_start = datetime.fromtimestamp(bucket_start_epoch, event_ts.tzinfo)
+    return f"auto_{bucket_start:%Y%m%d_%H%M}"
+
+
+def _resolve_service_for_event(
+    event_ts: datetime, config: RetentionConfig
+) -> tuple[str, str]:
+    service = resolve_active_service(event_ts)
+    if service is not None:
+        return str(service["culto_id"]), str(service["service_name"])
+    if config.contagem_continua_enabled:
+        return _resolve_fallback_interval_culto_id(event_ts, config), "Intervalo automatico"
+    raise ValueError("Nenhum culto ativo para este horario.")
+
+
 def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
     event_ts = payload.event_ts or datetime.now(UTC)
     event_ts = event_ts.astimezone()
     config = load_config()
-    service = resolve_active_service(event_ts)
-    if service is None:
-        raise ValueError("Nenhum culto ativo para este horario.")
-
-    culto_id = service["culto_id"]
+    culto_id, service_name = _resolve_service_for_event(event_ts, config)
     event_ts_s = event_ts.isoformat()
     event_id = str(uuid.uuid4())
     is_return = False
@@ -1566,7 +1597,7 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
     return {
         "event_id": event_id,
         "culto_id": culto_id,
-        "service_name": service["service_name"],
+        "service_name": service_name,
         "direction": payload.direction,
         "is_return": is_return,
         "is_new_unique": is_new_unique,
@@ -1576,12 +1607,18 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
 
 
 def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
+    config = load_config()
     if culto_id is None:
-        service = resolve_active_service(datetime.now(UTC).astimezone())
+        now_ts = datetime.now(UTC).astimezone()
+        service = resolve_active_service(now_ts)
         if service is None:
-            return {"active": False}
-        culto_id = service["culto_id"]
-        service_name = service["service_name"]
+            if not config.contagem_continua_enabled:
+                return {"active": False}
+            culto_id = _resolve_fallback_interval_culto_id(now_ts, config)
+            service_name = "Intervalo automatico"
+        else:
+            culto_id = service["culto_id"]
+            service_name = service["service_name"]
     else:
         service_name = None
 
