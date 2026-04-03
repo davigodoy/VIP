@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel de Configuracao - Frequencia</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar card">
+      <h2>Sistema VIP</h2>
+      <p class="help">Navegacao rapida</p>
+      <nav class="menu">
+        <a href="#sec-dashboard">Dashboard</a>
+        <a href="#sec-cultos">Cultos</a>
+        <a href="#sec-config-camera">Camera</a>
+        <a href="#sec-config-etaria">Faixas etarias</a>
+        <a href="#sec-config-sync">Planilha online</a>
+        <a href="#sec-config-retencao">Retencao</a>
+        <a href="#sec-update">Atualizacoes</a>
+        <a href="#sec-operacional">Operacional</a>
+        <a href="#sec-conciliacao">Conciliacao</a>
+      </nav>
+    </aside>
+
+    <section class="main-content">
+      <div class="topbar card">
+        <div>
+          <h1>Painel de Configuracao e Dashboard</h1>
+          <p class="subtitle">Sistema leve, responsivo e orientado a operacao do culto</p>
+        </div>
+        <button id="refresh-live" type="button" class="secondary">Atualizar agora</button>
+      </div>
+
+      <section id="sec-dashboard" class="card live-card">
+        <h2>Dashboard em tempo real</h2>
+        <p class="help">Atualizacao automatica a cada 5s.</p>
+        <div id="live-status" class="pill">Carregando...</div>
+        <div class="live-grid">
+          <div class="metric-box"><span class="metric-label">Ocupacao atual</span><span id="m-current" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Pico</span><span id="m-peak" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Entradas</span><span id="m-entries" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Saidas</span><span id="m-exits" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Retornos</span><span id="m-returns" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Unicos</span><span id="m-unique" class="metric-value">-</span></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>Fluxo por minuto (entradas x saidas)</h3>
+            <canvas id="chart-flow" height="180"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>Ocupacao ao longo do tempo</h3>
+            <canvas id="chart-occupancy" height="180"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>Faixas etarias</h3>
+            <canvas id="chart-age" height="200"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>Genero</h3>
+            <canvas id="chart-gender" height="200"></canvas>
+          </div>
+        </div>
+
+        <p class="help">Culto ativo: <strong id="live-service">-</strong> (<span id="live-culto-id">-</span>)</p>
+      </section>
+
+      <section id="sec-cultos" class="card">
+        <h2>Cultos (nome, dia e horario)</h2>
+        <p class="help">Cadastre os cultos para identificar corretamente os dados.</p>
+        <div class="schedule-list">
+          {% for schedule in schedules %}
+          <form method="post" action="/schedules/{{ schedule.id }}/save" class="schedule-row">
+            <input type="text" name="service_name" value="{{ schedule.service_name }}" maxlength="120" required />
+            <select name="day_of_week">
+              {% for idx, label in weekday_labels.items() %}
+                <option value="{{ idx }}" {% if schedule.day_of_week == idx %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <input type="time" name="start_time" value="{{ schedule.start_time }}" required />
+            <label class="checkbox inline">
+              <input type="checkbox" name="is_active" {% if schedule.is_active %}checked{% endif %} />
+              Ativo
+            </label>
+            <div class="inline-actions">
+              <button type="submit">Salvar</button>
+              <button type="submit" formaction="/schedules/{{ schedule.id }}/delete" formmethod="post" class="danger">Excluir</button>
+            </div>
+          </form>
+          {% else %}
+          <p>Nenhum culto cadastrado ainda.</p>
+          {% endfor %}
+        </div>
+
+        <h3>Adicionar novo culto</h3>
+        <form method="post" action="/schedules/create" class="grid">
+          <label>
+            Nome do culto
+            <input type="text" name="service_name" maxlength="120" placeholder="Domingo Noite" required />
+          </label>
+          <label>
+            Dia da semana
+            <select name="day_of_week" required>
+              {% for idx, label in weekday_labels.items() %}
+                <option value="{{ idx }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Horario
+            <input type="time" name="start_time" required />
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="is_active" checked />
+            Ativo
+          </label>
+          <div class="actions">
+            <button type="submit">Adicionar culto</button>
+          </div>
+        </form>
+      </section>
+
+      <form method="post" action="/config/save" class="stack-form">
+        <section id="sec-config-camera" class="card">
+          <h2>Configuracao da camera</h2>
+          <div class="grid">
+            <label>Nome da camera<input type="text" name="camera_label" value="{{ config.camera_label }}" required /></label>
+            <label>
+              Dispositivo da camera
+              <input type="text" name="camera_device" value="{{ config.camera_device }}" list="camera-device-list" required />
+              <datalist id="camera-device-list">
+                {% for device in camera_devices %}
+                  <option value="{{ device }}"></option>
+                {% endfor %}
+              </datalist>
+            </label>
+            <label class="checkbox"><input type="checkbox" name="camera_enabled" {% if config.camera_enabled %}checked{% endif %} />Camera habilitada</label>
+            <label>Resolucao inferencia (largura)<input type="number" name="camera_inference_width" min="160" max="1920" value="{{ config.camera_inference_width }}" required /></label>
+            <label>Resolucao inferencia (altura)<input type="number" name="camera_inference_height" min="120" max="1080" value="{{ config.camera_inference_height }}" required /></label>
+            <label>FPS de processamento<input type="number" name="camera_fps" min="1" max="60" value="{{ config.camera_fps }}" required /></label>
+            <label>Janela inicio do culto (min antes)<input type="number" name="culto_antecedencia_min" min="0" max="180" value="{{ config.culto_antecedencia_min }}" required /></label>
+            <label>Duracao da janela do culto (min)<input type="number" name="culto_duracao_min" min="30" max="360" value="{{ config.culto_duracao_min }}" required /></label>
+          </div>
+        </section>
+
+        <section id="sec-config-etaria" class="card">
+          <h2>Faixas etarias e genero</h2>
+          <div class="grid">
+            <label class="checkbox"><input type="checkbox" name="estimar_faixa_etaria" {% if config.estimar_faixa_etaria %}checked{% endif %} />Estimar faixa etaria</label>
+            <label class="checkbox"><input type="checkbox" name="estimar_genero" {% if config.estimar_genero %}checked{% endif %} />Estimar genero</label>
+            <label>Limite crianca (idade <=)<input type="number" name="idade_limite_crianca" min="1" max="30" value="{{ config.idade_limite_crianca }}" required /></label>
+            <label>Limite junior (idade <=)<input type="number" name="idade_limite_junior" min="2" max="40" value="{{ config.idade_limite_junior }}" required /></label>
+            <label>Limite adolescente (idade <=)<input type="number" name="idade_limite_adolescente" min="5" max="60" value="{{ config.idade_limite_adolescente }}" required /></label>
+            <label>Limite jovem (idade <=)<input type="number" name="idade_limite_jovem" min="10" max="80" value="{{ config.idade_limite_jovem }}" required /></label>
+            <label>Limite adulto (idade <=)<input type="number" name="idade_limite_adulto" min="10" max="100" value="{{ config.idade_limite_adulto }}" required /></label>
+          </div>
+        </section>
+
+        <section id="sec-config-sync" class="card">
+          <h2>Planilha online (Google Sheets)</h2>
+          <div class="grid">
+            <label class="checkbox"><input type="checkbox" name="sync_google_sheets_enabled" {% if config.sync_google_sheets_enabled %}checked{% endif %} />Sincronizar com Google Sheets</label>
+            <label>Intervalo de sync (segundos)<input type="number" name="sync_interval_sec" min="30" max="3600" value="{{ config.sync_interval_sec }}" required /></label>
+            <label>Spreadsheet ID<input type="text" name="sync_spreadsheet_id" value="{{ config.sync_spreadsheet_id }}" placeholder="1AbC..." /></label>
+            <label>Nome da aba<input type="text" name="sync_worksheet_name" value="{{ config.sync_worksheet_name }}" required /></label>
+            <label>
+              Fonte da credencial
+              <select name="sync_credentials_source">
+                <option value="env" {% if config.sync_credentials_source == "env" %}selected{% endif %}>Variavel de ambiente</option>
+                <option value="file" {% if config.sync_credentials_source == "file" %}selected{% endif %}>Arquivo no Raspberry</option>
+                <option value="inline" {% if config.sync_credentials_source == "inline" %}selected{% endif %}>JSON no painel</option>
+              </select>
+            </label>
+            <label>Nome da variavel (modo env)<input type="text" name="sync_credentials_env_var" value="{{ config.sync_credentials_env_var }}" placeholder="VIP_GSHEETS_CREDENTIALS_JSON" /></label>
+            <label>Caminho arquivo (modo file)<input type="text" name="sync_credentials_file_path" value="{{ config.sync_credentials_file_path }}" placeholder="/opt/vip/creds/service-account.json" /></label>
+            <label class="full">Credenciais JSON (modo inline)<textarea name="sync_credentials_json" rows="6" placeholder='{"type":"service_account",...}'>{{ config.sync_credentials_json }}</textarea></label>
+          </div>
+        </section>
+
+        <section id="sec-config-retencao" class="card">
+          <h2>Retencao e limpeza</h2>
+          <div class="grid">
+            <label>Temp ID (horas)<input type="number" name="retencao_temp_id_horas" min="0" max="720" value="{{ config.retencao_temp_id_horas }}" required /></label>
+            <label>Profile ID (dias)<input type="number" name="retencao_profile_dias" min="1" max="3650" value="{{ config.retencao_profile_dias }}" required /></label>
+            <label>Eventos (dias)<input type="number" name="retencao_eventos_dias" min="1" max="3650" value="{{ config.retencao_eventos_dias }}" required /></label>
+            <label>Agregados (meses)<input type="number" name="retencao_agregados_meses" min="1" max="120" value="{{ config.retencao_agregados_meses }}" required /></label>
+            <label>Imagens/Snapshots (horas)<input type="number" name="retencao_imagens_horas" min="0" max="720" value="{{ config.retencao_imagens_horas }}" required /></label>
+            <label>Janela de reentrada (min)<input type="number" name="janela_reentrada_min" min="1" max="240" value="{{ config.janela_reentrada_min }}" required /></label>
+            <label>Limiar de match (0-1)<input type="number" name="limiar_match" min="0" max="1" step="0.01" value="{{ config.limiar_match }}" required /></label>
+            <label>Hora limpeza automatica (0-23)<input type="number" name="auto_cleanup_hour" min="0" max="23" value="{{ config.auto_cleanup_hour }}" required /></label>
+            <label class="checkbox"><input type="checkbox" name="auto_cleanup_enabled" {% if config.auto_cleanup_enabled %}checked{% endif %} />Habilitar limpeza automatica diaria</label>
+          </div>
+          <div class="actions">
+            <button type="submit">Salvar configuracao</button>
+          </div>
+        </section>
+      </form>
+
+      <section id="sec-update" class="card">
+        <h2>Atualizacao do sistema</h2>
+        <p class="help warn">
+          Atualizar pode reiniciar o servico e causar indisponibilidade temporaria.
+          Execute preferencialmente fora do horario de culto.
+        </p>
+        <ul>
+          <li><strong>Branch:</strong> <span id="upd-branch">{{ update_status.branch or '-' }}</span></li>
+          <li><strong>Commit local:</strong> <code id="upd-local">{{ update_status.local_commit_short or '-' }}</code></li>
+          <li><strong>Commit remoto:</strong> <code id="upd-remote">{{ update_status.remote_commit_short or '-' }}</code></li>
+          <li><strong>Atras de:</strong> <span id="upd-behind">{{ update_status.behind_count or 0 }}</span> commit(s)</li>
+          <li><strong>Adiante:</strong> <span id="upd-ahead">{{ update_status.ahead_count or 0 }}</span> commit(s)</li>
+          <li><strong>Ultimo update:</strong> <span id="upd-last-run">{{ update_status.last_run_ts or '-' }}</span></li>
+          <li><strong>Status:</strong> <span id="upd-last-status">{{ update_status.last_status or 'never' }}</span></li>
+        </ul>
+        <p id="upd-last-msg" class="help">{{ update_status.last_message or '' }}</p>
+        <div class="reconcile-actions">
+          <button id="run-update-check" type="button" class="secondary">Checar atualizacoes</button>
+          <button id="run-update-now" type="button">Atualizar agora (git pull + deps + restart)</button>
+          <p id="update-state" class="help">Status: {{ 'em execucao' if update_status.running else 'ocioso' }}</p>
+        </div>
+        <div class="progress-wrap" aria-label="Progresso da atualizacao">
+          <progress id="update-progress" max="100" value="{{ update_status.progress_pct or 0 }}"></progress>
+          <span id="update-progress-label">{{ update_status.progress_pct or 0 }}%</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Inicio</th>
+                <th>Fim</th>
+                <th>Status</th>
+                <th>Passo</th>
+                <th>Mensagem</th>
+              </tr>
+            </thead>
+            <tbody id="update-runs-body">
+              <tr>
+                <td colspan="5">Carregando historico...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sec-operacional" class="card">
+        <h2>Status operacional</h2>
+        <div class="status-grid">
+          <div>
+            <h3>Camera</h3>
+            <ul>
+              <li><strong>Nome:</strong> {{ camera_status.camera_label }}</li>
+              <li><strong>Dispositivo:</strong> {{ camera_status.camera_device }}</li>
+              <li><strong>Existe:</strong> {% if camera_status.camera_device_exists %}Sim{% else %}Nao{% endif %}</li>
+              <li><strong>Habilitada:</strong> {% if camera_status.camera_enabled %}Sim{% else %}Nao{% endif %}</li>
+              <li><strong>Resolucao:</strong> {{ camera_status.inference_resolution }}</li>
+              <li><strong>FPS:</strong> {{ camera_status.camera_fps }}</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Auto start (boot)</h3>
+            <ul>
+              <li><strong>Service:</strong> {{ systemd_status.service_name }}</li>
+              <li><strong>Arquivo:</strong> {% if systemd_status.service_file_exists %}Encontrado{% else %}Nao encontrado{% endif %}</li>
+              <li><strong>Enabled:</strong> {{ systemd_status.enabled }}</li>
+              <li><strong>Active:</strong> {{ systemd_status.active }}</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Sync Google Sheets</h3>
+            <ul>
+              <li><strong>Habilitado:</strong> {% if sheets_status.enabled %}Sim{% else %}Nao{% endif %}</li>
+              <li><strong>Intervalo:</strong> {{ sheets_status.interval_sec }}s</li>
+              <li><strong>Planilha:</strong> {% if sheets_status.spreadsheet_id_set %}Configurada{% else %}Nao configurada{% endif %}</li>
+              <li><strong>Aba:</strong> {{ sheets_status.worksheet_name }}</li>
+              <li><strong>Credenciais:</strong> {% if sheets_status.credentials_set %}Configuradas{% else %}Nao configuradas{% endif %}</li>
+              <li><strong>Fonte:</strong> {{ sheets_status.credentials_source }}</li>
+              <li><strong>Pendentes:</strong> {{ sheets_status.pending_rows }}</li>
+              <li><strong>Ultimo status:</strong> {{ sheets_status.last_status }}</li>
+              <li><strong>Ultima execucao:</strong> {{ sheets_status.last_run_ts or '-' }}</li>
+            </ul>
+            {% if sheets_status.last_error %}
+            <p class="help">Ultimo erro: {{ sheets_status.last_error }}</p>
+            {% endif %}
+            <button id="run-sync-now" type="button">Sincronizar agora</button>
+            <p id="run-sync-result" class="help"></p>
+          </div>
+        </div>
+      </section>
+
+      <section id="sec-conciliacao" class="card">
+        <h2>Conciliacao (PC/Mac)</h2>
+        <p class="help warn">
+          Execute a conciliacao manualmente para recalcular estatisticas a partir dos eventos brutos.
+          <strong>Pode causar lentidao temporaria</strong> enquanto processa.
+        </p>
+        <div class="reconcile-actions">
+          <button id="run-reconcile-now" type="button">Rodar conciliacao agora</button>
+          <p id="reconcile-state" class="help">Status: carregando...</p>
+        </div>
+        <div class="progress-wrap" aria-label="Progresso da conciliacao">
+          <progress id="reconcile-progress" max="100" value="0"></progress>
+          <span id="reconcile-progress-label">0%</span>
+        </div>
+        <p id="reconcile-message" class="help"></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data/hora</th>
+                <th>Status</th>
+                <th>Eventos</th>
+                <th>Cultos</th>
+                <th>Duracao (s)</th>
+                <th>Mensagem</th>
+              </tr>
+            </thead>
+            <tbody id="reconcile-runs-body">
+              <tr>
+                <td colspan="6">Carregando historico...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Limpeza manual</h2>
+        <div class="cleanup-actions">
+          <form method="post" action="/cleanup/run">
+            <input type="hidden" name="dry_run" value="true" />
+            <button type="submit" class="secondary">Simular limpeza (dry-run)</button>
+          </form>
+          <form method="post" action="/cleanup/run" onsubmit="return confirm('Executar limpeza real agora?');">
+            <input type="hidden" name="dry_run" value="false" />
+            <button type="submit" class="danger">Executar limpeza agora</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Historico de limpezas</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data/hora</th>
+                <th>Modo</th>
+                <th>Temp IDs</th>
+                <th>Profiles</th>
+                <th>Events</th>
+                <th>Agregados</th>
+                <th>Snapshots</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for run in runs %}
+              <tr>
+                <td>{{ run.run_ts }}</td>
+                <td>{% if run.dry_run %}Dry-run{% else %}Real{% endif %}</td>
+                <td>{{ run.deleted_or_would_delete.temp_tracks }}</td>
+                <td>{{ run.deleted_or_would_delete.profiles }}</td>
+                <td>{{ run.deleted_or_would_delete.events }}</td>
+                <td>{{ run.deleted_or_would_delete.aggregated_metrics }}</td>
+                <td>{{ run.deleted_or_would_delete.snapshots }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="7">Nenhuma execucao registrada ainda.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+    const setText = (id, value) => { const node = el(id); if (node) node.textContent = String(value); };
+
+    let flowChart;
+    let occupancyChart;
+    let ageChart;
+    let genderChart;
+
+    function buildLineChart(ctx, labelA, labelB) {
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            { label: labelA, data: [], borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.2)', tension: 0.25, fill: false, pointRadius: 1.8 },
+            { label: labelB, data: [], borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,0.2)', tension: 0.25, fill: false, pointRadius: 1.8 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function buildSingleLineChart(ctx, label, color) {
+      return new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label, data: [], borderColor: color, backgroundColor: 'rgba(37,99,235,0.15)', tension: 0.25, fill: true, pointRadius: 1.8 }] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function buildBarChart(ctx, labels, colors) {
+      return new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ data: labels.map(() => 0), backgroundColor: colors }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function ensureCharts() {
+      if (!window.Chart) return;
+      if (!flowChart) {
+        const ctx = document.getElementById('chart-flow');
+        if (ctx) flowChart = buildLineChart(ctx, 'Entradas/min', 'Saidas/min');
+      }
+      if (!occupancyChart) {
+        const ctx = document.getElementById('chart-occupancy');
+        if (ctx) occupancyChart = buildSingleLineChart(ctx, 'Ocupacao', '#7c3aed');
+      }
+      if (!ageChart) {
+        const ctx = document.getElementById('chart-age');
+        if (ctx) {
+          ageChart = buildBarChart(
+            ctx,
+            ['Crianca', 'Junior', 'Adolescente', 'Jovem', 'Adulto', 'Idoso'],
+            ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af']
+          );
+        }
+      }
+      if (!genderChart) {
+        const ctx = document.getElementById('chart-gender');
+        if (ctx) {
+          genderChart = buildBarChart(
+            ctx,
+            ['Homem', 'Mulher'],
+            ['#2563eb', '#ec4899']
+          );
+        }
+      }
+    }
+
+    function updateCharts(data) {
+      ensureCharts();
+      const charts = data.charts || {};
+      const flow = charts.flow_per_minute || [];
+      const occ = charts.occupancy_series || [];
+
+      if (flowChart) {
+        flowChart.data.labels = flow.map((p) => p.ts || '');
+        flowChart.data.datasets[0].data = flow.map((p) => p.entries || 0);
+        flowChart.data.datasets[1].data = flow.map((p) => p.exits || 0);
+        flowChart.update();
+      }
+      if (occupancyChart) {
+        occupancyChart.data.labels = occ.map((p) => p.ts || '');
+        occupancyChart.data.datasets[0].data = occ.map((p) => p.occupancy || 0);
+        occupancyChart.update();
+      }
+      if (ageChart) {
+        const a = data.age_bands || {};
+        ageChart.data.datasets[0].data = [
+          a.crianca || 0,
+          a.junior || 0,
+          a.adolescente || 0,
+          a.jovem || 0,
+          a.adulto || 0,
+          a.idoso || 0
+        ];
+        ageChart.update();
+      }
+      if (genderChart) {
+        const g = data.genders || {};
+        genderChart.data.datasets[0].data = [g.homem || 0, g.mulher || 0];
+        genderChart.update();
+      }
+    }
+
+    async function refreshCharts() {
+      try {
+        const res = await fetch('/api/metrics/charts', { cache: 'no-store' });
+        const data = await res.json();
+        updateCharts(data);
+      } catch (err) {
+        // keep live metrics running even if chart fetch fails
+      }
+    }
+
+    async function refreshLive() {
+      try {
+        const liveCard = document.querySelector('.live-card');
+        const res = await fetch('/api/metrics/live', { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.active) {
+          if (liveCard) liveCard.classList.add('live-offline');
+          setText('live-status', 'Sem culto ativo no momento');
+          setText('live-service', '-');
+          setText('live-culto-id', '-');
+          setText('m-current', 0);
+          setText('m-peak', 0);
+          setText('m-entries', 0);
+          setText('m-exits', 0);
+          setText('m-returns', 0);
+          setText('m-unique', 0);
+          updateCharts({
+            active: false,
+            timeline: [],
+            series: {
+              entries_cumulative: [],
+              exits_cumulative: [],
+              occupancy: [],
+            },
+            distributions: {
+              age: { labels: [], values: [] },
+              gender: { labels: [], values: [] },
+            },
+          });
+          return;
+        }
+        if (liveCard) liveCard.classList.remove('live-offline');
+        setText('live-status', 'Online');
+        setText('live-service', data.service_name || '-');
+        setText('live-culto-id', data.culto_id || '-');
+        setText('m-current', data.current_occupancy ?? 0);
+        setText('m-peak', data.peak_occupancy ?? 0);
+        setText('m-entries', data.entries_count ?? 0);
+        setText('m-exits', data.exits_count ?? 0);
+        setText('m-returns', data.returns_count ?? 0);
+        setText('m-unique', data.unique_people_count ?? 0);
+      } catch (err) {
+        setText('live-status', 'Falha ao atualizar');
+      }
+    }
+
+    const refreshBtn = document.getElementById('refresh-live');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', refreshLive);
+    }
+
+    const syncBtn = document.getElementById('run-sync-now');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async () => {
+        const out = document.getElementById('run-sync-result');
+        if (out) out.textContent = 'Sincronizando...';
+        try {
+          const res = await fetch('/api/sync/run', { method: 'POST' });
+          const data = await res.json();
+          if (out) out.textContent = `${data.status}: ${data.rows_synced} linhas (${data.message})`;
+        } catch (err) {
+          if (out) out.textContent = 'Falha na sincronizacao';
+        }
+      });
+    }
+
+    function setUpdateProgress(pct) {
+      const value = Math.max(0, Math.min(100, Number(pct) || 0));
+      const bar = document.getElementById('update-progress');
+      const label = document.getElementById('update-progress-label');
+      if (bar) bar.value = value;
+      if (label) label.textContent = `${Math.round(value)}%`;
+    }
+
+    function renderUpdateRuns(runs) {
+      const body = document.getElementById('update-runs-body');
+      if (!body) return;
+      if (!Array.isArray(runs) || runs.length === 0) {
+        body.innerHTML = '<tr><td colspan="5">Nenhum update registrado.</td></tr>';
+        return;
+      }
+      body.innerHTML = runs.map((run) => `
+        <tr>
+          <td>${run.started_at || '-'}</td>
+          <td>${run.finished_at || '-'}</td>
+          <td>${run.status || '-'}</td>
+          <td>${run.current_step || '-'}</td>
+          <td>${run.message || '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function updateUpdateInfo(data) {
+      setText('upd-branch', data.branch || '-');
+      setText('upd-local', data.local_commit_short || '-');
+      setText('upd-remote', data.remote_commit_short || '-');
+      setText('upd-behind', data.behind_count ?? 0);
+      setText('upd-ahead', data.ahead_count ?? 0);
+      setText('upd-last-run', data.last_run_ts || '-');
+      setText('upd-last-status', data.last_status || '-');
+      setText('upd-last-msg', data.message || '');
+      setText('update-state', data.running ? 'Status: em execucao' : 'Status: ocioso');
+      setUpdateProgress(data.progress_pct ?? 0);
+      const updateBtn = document.getElementById('run-update-now');
+      if (updateBtn) updateBtn.disabled = !!data.running;
+    }
+
+    async function refreshUpdateStatus(refreshRemote = false) {
+      const q = refreshRemote ? '?refresh_remote=1' : '';
+      const res = await fetch(`/api/update/status${q}`, { cache: 'no-store' });
+      const data = await res.json();
+      updateUpdateInfo(data);
+      return data;
+    }
+
+    async function refreshUpdateHistory() {
+      const res = await fetch('/api/update/history?limit=10', { cache: 'no-store' });
+      const data = await res.json();
+      renderUpdateRuns(data.runs || []);
+    }
+
+    async function refreshUpdates(refreshRemote = false) {
+      try {
+        await Promise.all([refreshUpdateStatus(refreshRemote), refreshUpdateHistory()]);
+      } catch (err) {
+        setText('update-state', 'Status: falha ao consultar');
+      }
+    }
+
+    const updateCheckBtn = document.getElementById('run-update-check');
+    if (updateCheckBtn) {
+      updateCheckBtn.addEventListener('click', async () => {
+        updateCheckBtn.disabled = true;
+        try {
+          await refreshUpdates(true);
+        } finally {
+          updateCheckBtn.disabled = false;
+        }
+      });
+    }
+
+    const updateRunBtn = document.getElementById('run-update-now');
+    if (updateRunBtn) {
+      updateRunBtn.addEventListener('click', async () => {
+        if (!confirm('Deseja atualizar agora? O servico pode reiniciar e ficar indisponivel por alguns segundos.')) {
+          return;
+        }
+        setText('update-state', 'Status: iniciando...');
+        try {
+          const res = await fetch('/api/update/run', { method: 'POST' });
+          const data = await res.json();
+          setText('upd-last-msg', data.message || 'Update solicitado');
+          await refreshUpdates(false);
+        } catch (err) {
+          setText('upd-last-msg', 'Falha ao iniciar atualizacao');
+        }
+      });
+    }
+
+    function setReconcileProgress(pct) {
+      const value = Math.max(0, Math.min(100, Number(pct) || 0));
+      const bar = document.getElementById('reconcile-progress');
+      const label = document.getElementById('reconcile-progress-label');
+      if (bar) bar.value = value;
+      if (label) label.textContent = `${Math.round(value)}%`;
+    }
+
+    function renderReconcileRuns(runs) {
+      const body = document.getElementById('reconcile-runs-body');
+      if (!body) return;
+      if (!Array.isArray(runs) || runs.length === 0) {
+        body.innerHTML = '<tr><td colspan="6">Nenhuma conciliacao registrada.</td></tr>';
+        return;
+      }
+      body.innerHTML = runs.map((run) => `
+        <tr>
+          <td>${run.run_ts || '-'}</td>
+          <td>${run.status || '-'}</td>
+          <td>${run.processed_events ?? 0}</td>
+          <td>${run.processed_services ?? 0}</td>
+          <td>${run.duration_sec ?? 0}</td>
+          <td>${run.message || '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function refreshReconciliation() {
+      try {
+        const res = await fetch('/api/reconciliation/status', { cache: 'no-store' });
+        const data = await res.json();
+        setText('reconcile-state', data.running ? 'Status: em execucao' : 'Status: ocioso');
+        setReconcileProgress(data.progress_pct ?? 0);
+        setText('reconcile-message', data.message || '');
+        renderReconcileRuns(data.recent_runs || []);
+        const btn = document.getElementById('run-reconcile-now');
+        if (btn) btn.disabled = !!data.running;
+      } catch (err) {
+        setText('reconcile-state', 'Status: falha ao consultar');
+      }
+    }
+
+    const reconcileBtn = document.getElementById('run-reconcile-now');
+    if (reconcileBtn) {
+      reconcileBtn.addEventListener('click', async () => {
+        setText('reconcile-message', 'Iniciando conciliacao...');
+        try {
+          const res = await fetch('/api/reconciliation/run', { method: 'POST' });
+          const data = await res.json();
+          setText('reconcile-message', data.message || 'Conciliacao iniciada');
+          await refreshReconciliation();
+        } catch (err) {
+          setText('reconcile-message', 'Falha ao iniciar conciliacao');
+        }
+      });
+    }
+
+    ensureCharts();
+    refreshLive();
+    refreshCharts();
+    refreshUpdates();
+    refreshReconciliation();
+    setInterval(refreshLive, 5000);
+    setInterval(refreshCharts, 5000);
+    setInterval(refreshUpdates, 4000);
+    setInterval(refreshReconciliation, 2000);
+  </script>
+</body>
+</html>
