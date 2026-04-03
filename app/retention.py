@@ -1140,9 +1140,23 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
     python_exec = str((repo / ".venv" / "bin" / "python")) if (repo / ".venv" / "bin" / "python").exists() else os.environ.get("PYTHON_BIN", "python3")
     pip_exec_cmd: list[str]
     if (repo / ".venv" / "bin" / "pip").exists():
-        pip_exec_cmd = [str(repo / ".venv" / "bin" / "pip"), "install", "-r", "requirements.txt"]
+        pip_exec_cmd = [
+            str(repo / ".venv" / "bin" / "pip"),
+            "install",
+            "-r",
+            "requirements.txt",
+        ]
     else:
-        pip_exec_cmd = [python_exec, "-m", "pip", "install", "-r", "requirements.txt"]
+        # Debian Bookworm/Trixie may block global pip installs (PEP 668).
+        pip_exec_cmd = [
+            python_exec,
+            "-m",
+            "pip",
+            "install",
+            "--break-system-packages",
+            "-r",
+            "requirements.txt",
+        ]
 
     git_info = _collect_git_update_info(refresh_remote=False)
     branch = str(git_info["branch"] or "").strip()
