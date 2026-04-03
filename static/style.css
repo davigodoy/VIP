@@ -196,7 +196,9 @@ h1 {
 
 .chart-card canvas {
   width: 100%;
-  height: 220px;
+  height: 240px;
+  min-height: 240px;
+  max-height: 240px;
 }
 
 .chart-card.small canvas {

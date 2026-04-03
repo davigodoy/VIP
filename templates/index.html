@@ -416,21 +416,55 @@
     let ageChart;
     let genderChart;
 
+    function lockChartInteractions(canvas) {
+      if (!canvas) return;
+      const block = (ev) => {
+        ev.preventDefault();
+      };
+      canvas.addEventListener('wheel', block, { passive: false });
+      canvas.addEventListener('gesturestart', block, { passive: false });
+      canvas.addEventListener('gesturechange', block, { passive: false });
+      canvas.addEventListener('gestureend', block, { passive: false });
+    }
+
+    function fmtTsLabel(value) {
+      if (!value) return '';
+      try {
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return String(value);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+      } catch (err) {
+        return String(value);
+      }
+    }
+
     function buildLineChart(ctx, labelA, labelB) {
       return new Chart(ctx, {
         type: 'line',
         data: {
           labels: [],
           datasets: [
-            { label: labelA, data: [], borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.2)', tension: 0.25, fill: false, pointRadius: 1.8 },
-            { label: labelB, data: [], borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,0.2)', tension: 0.25, fill: false, pointRadius: 1.8 }
+            { label: labelA, data: [], borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.2)', tension: 0, fill: false, pointRadius: 1.2 },
+            { label: labelB, data: [], borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,0.2)', tension: 0, fill: false, pointRadius: 1.2 }
           ]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom' } },
-          scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true } }
+          scales: {
+            x: { ticks: { maxTicksLimit: 8 } },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                precision: 0,
+                callback: (value) => `${Math.trunc(Number(value) || 0)}`
+              }
+            }
+          }
         }
       });
     }
@@ -438,12 +472,22 @@
     function buildSingleLineChart(ctx, label, color) {
       return new Chart(ctx, {
         type: 'line',
-        data: { labels: [], datasets: [{ label, data: [], borderColor: color, backgroundColor: 'rgba(37,99,235,0.15)', tension: 0.25, fill: true, pointRadius: 1.8 }] },
+        data: { labels: [], datasets: [{ label, data: [], borderColor: color, backgroundColor: 'rgba(37,99,235,0.15)', tension: 0, fill: true, pointRadius: 1.2 }] },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom' } },
-          scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true } }
+          scales: {
+            x: { ticks: { maxTicksLimit: 8 } },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                precision: 0,
+                callback: (value) => `${Math.trunc(Number(value) || 0)}`
+              }
+            }
+          }
         }
       });
     }
@@ -456,10 +500,19 @@
           datasets: [{ data: labels.map(() => 0), backgroundColor: colors }]
         },
         options: {
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },
-          scales: { y: { beginAtZero: true } }
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                precision: 0,
+                callback: (value) => `${Math.trunc(Number(value) || 0)}`
+              }
+            }
+          }
         }
       });
     }
@@ -468,15 +521,22 @@
       if (!window.Chart) return;
       if (!flowChart) {
         const ctx = document.getElementById('chart-flow');
-        if (ctx) flowChart = buildLineChart(ctx, 'Entradas/min', 'Saidas/min');
+        if (ctx) {
+          lockChartInteractions(ctx);
+          flowChart = buildLineChart(ctx, 'Entradas/min', 'Saidas/min');
+        }
       }
       if (!occupancyChart) {
         const ctx = document.getElementById('chart-occupancy');
-        if (ctx) occupancyChart = buildSingleLineChart(ctx, 'Ocupacao', '#7c3aed');
+        if (ctx) {
+          lockChartInteractions(ctx);
+          occupancyChart = buildSingleLineChart(ctx, 'Ocupacao', '#7c3aed');
+        }
       }
       if (!ageChart) {
         const ctx = document.getElementById('chart-age');
         if (ctx) {
+          lockChartInteractions(ctx);
           ageChart = buildBarChart(
             ctx,
             ['Crianca', 'Junior', 'Adolescente', 'Jovem', 'Adulto', 'Idoso'],
@@ -487,6 +547,7 @@
       if (!genderChart) {
         const ctx = document.getElementById('chart-gender');
         if (ctx) {
+          lockChartInteractions(ctx);
           genderChart = buildBarChart(
             ctx,
             ['Homem', 'Mulher'],
@@ -503,14 +564,14 @@
       const occ = charts.occupancy_series || [];
 
       if (flowChart) {
-        flowChart.data.labels = flow.map((p) => p.ts || '');
-        flowChart.data.datasets[0].data = flow.map((p) => p.entries || 0);
-        flowChart.data.datasets[1].data = flow.map((p) => p.exits || 0);
+        flowChart.data.labels = flow.map((p) => fmtTsLabel(p.ts));
+        flowChart.data.datasets[0].data = flow.map((p) => Math.trunc(Number(p.entries) || 0));
+        flowChart.data.datasets[1].data = flow.map((p) => Math.trunc(Number(p.exits) || 0));
         flowChart.update();
       }
       if (occupancyChart) {
-        occupancyChart.data.labels = occ.map((p) => p.ts || '');
-        occupancyChart.data.datasets[0].data = occ.map((p) => p.occupancy || 0);
+        occupancyChart.data.labels = occ.map((p) => fmtTsLabel(p.ts));
+        occupancyChart.data.datasets[0].data = occ.map((p) => Math.trunc(Number(p.occupancy) || 0));
         occupancyChart.update();
       }
       if (ageChart) {
