@@ -111,6 +111,49 @@ h1 {
   margin-top: 8px;
 }
 
+.camera-preview-wrap {
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+}
+
+.camera-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.camera-preview-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #334155;
+}
+
+.camera-preview-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.camera-preview-controls .checkbox {
+  font-size: 12px;
+}
+
+.camera-preview-frame {
+  margin-top: 8px;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #0f172a;
+  border-radius: 6px;
+  border: 1px solid #0f172a;
+}
+
 .metric-box {
   background: #fff;
   border: 1px solid #e5e7eb;

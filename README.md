@@ -23,6 +23,8 @@ Escopo funcional:
   - nome, dia da semana, horario e status ativo/inativo
 - Configuracao de camera:
   - dispositivo (ex.: `/dev/video0`), nome, resolucao de inferencia e FPS
+  - preview ao vivo no painel (MJPEG)
+  - opcao de overlay com deteccao facial (caixas em tempo real)
 - Dashboard em tempo real:
   - entradas, saidas, retornos, unicos, ocupacao atual e pico
   - graficos de fluxo, ocupacao, faixa etaria e genero
@@ -150,6 +152,21 @@ sudo systemctl status vip-dashboard.service
 
 - `GET /api/metrics/live`
 - `GET /api/metrics/charts`
+
+### Preview de camera
+
+- `GET /api/camera/preview.mjpg`
+  - stream MJPEG para visualizacao ao vivo no painel
+  - query params:
+    - `faces` (`0|1`): habilita/desabilita overlay de deteccao facial
+    - `width` (opcional)
+    - `height` (opcional)
+- `GET /api/camera/preview/status`
+  - retorna status atual do preview (running, fps, faces, erro, etc.)
+- `GET /api/camera/preview`
+  - inicia/reconfigura o loop de preview
+- `POST /api/camera/preview/stop`
+  - encerra o loop de preview
 
 ### Sincronizacao Google Sheets
 

@@ -13,6 +13,7 @@
       <p class="help">Navegacao rapida</p>
       <nav class="menu">
         <a href="#sec-dashboard">Dashboard</a>
+        <a href="#sec-camera-preview">Preview camera</a>
         <a href="#sec-cultos">Cultos</a>
         <a href="#sec-config-camera">Camera</a>
         <a href="#sec-config-etaria">Faixas etarias</a>
@@ -69,6 +70,31 @@
         </div>
 
         <p class="help">Culto ativo: <strong id="live-service">-</strong> (<span id="live-culto-id">-</span>)</p>
+      </section>
+
+      <section id="sec-camera-preview" class="card">
+        <h2>Preview da camera</h2>
+        <p class="help">
+          Visualizacao ao vivo da camera instalada para validacao de enquadramento.
+          Opcionalmente, habilite deteccao facial para ver caixas em tempo real.
+        </p>
+        <div class="camera-preview-controls">
+          <label class="checkbox inline">
+            <input id="preview-face-toggle" type="checkbox" />
+            Mostrar deteccao facial (tracing)
+          </label>
+          <button id="preview-reload" type="button" class="secondary">Recarregar stream</button>
+          <span id="preview-status" class="help">Status: carregando...</span>
+        </div>
+        <div class="camera-preview-wrap">
+          <img
+            id="camera-preview-image"
+            class="camera-preview-frame"
+            src="/api/camera/preview.mjpg"
+            alt="Preview da camera"
+            loading="lazy"
+          />
+        </div>
       </section>
 
       <section id="sec-cultos" class="card">
@@ -567,6 +593,32 @@
       refreshBtn.addEventListener('click', refreshLive);
     }
 
+    function setupCameraPreview() {
+      const img = document.getElementById('camera-preview-image');
+      const toggle = document.getElementById('preview-face-toggle');
+      const reloadBtn = document.getElementById('preview-reload');
+      const status = document.getElementById('preview-status');
+      if (!img || !toggle) return;
+
+      const applySrc = () => {
+        const withFace = !!toggle.checked;
+        const q = `faces=${withFace ? 1 : 0}&_ts=${Date.now()}`;
+        img.src = `/api/camera/preview.mjpg?${q}`;
+        if (status) {
+          status.textContent = withFace
+            ? 'Status: preview com deteccao facial'
+            : 'Status: preview sem deteccao facial';
+        }
+      };
+
+      toggle.addEventListener('change', applySrc);
+      if (reloadBtn) reloadBtn.addEventListener('click', applySrc);
+      img.addEventListener('error', () => {
+        if (status) status.textContent = 'Status: falha ao carregar stream';
+      });
+      applySrc();
+    }
+
     const syncBtn = document.getElementById('run-sync-now');
     if (syncBtn) {
       syncBtn.addEventListener('click', async () => {
@@ -733,6 +785,7 @@
     }
 
     ensureCharts();
+    setupCameraPreview();
     refreshLive();
     refreshCharts();
     refreshUpdates();

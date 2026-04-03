@@ -6,11 +6,12 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
+from .camera_preview import get_preview_status, preview_jpeg, start_preview, stop_preview
 from .db import init_db
 from .models import (
     EventIngestRequest,
@@ -145,6 +146,82 @@ async def get_camera_status() -> JSONResponse:
     status = camera_status()
     status["available_devices"] = list_camera_devices()
     return JSONResponse(content=status)
+
+
+@app.get("/api/camera/preview")
+async def api_camera_preview(
+    device: str | None = None,
+    width: int = 640,
+    height: int = 360,
+    detect_face: int = 0,
+) -> JSONResponse:
+    cfg = load_config()
+    safe_width = max(160, min(width, 1920))
+    safe_height = max(120, min(height, 1080))
+    safe_fps = max(1, min(int(cfg.camera_fps), 15))
+    camera_device = (device or cfg.camera_device).strip()
+    await asyncio.to_thread(
+        start_preview,
+        camera_device=camera_device,
+        width=safe_width,
+        height=safe_height,
+        fps=safe_fps,
+        overlay_faces=bool(detect_face),
+    )
+    return JSONResponse(content=get_preview_status())
+
+
+@app.post("/api/camera/preview/stop")
+async def api_camera_preview_stop() -> JSONResponse:
+    await asyncio.to_thread(stop_preview)
+    return JSONResponse(content=get_preview_status())
+
+
+@app.get("/api/camera/preview/status")
+async def api_camera_preview_status() -> JSONResponse:
+    return JSONResponse(content=get_preview_status())
+
+
+@app.get("/api/camera/preview.mjpg")
+async def api_camera_preview_mjpg(
+    faces: int = 0,
+    width: int = 640,
+    height: int = 360,
+) -> StreamingResponse:
+    cfg = load_config()
+    safe_width = max(160, min(width, 1920))
+    safe_height = max(120, min(height, 1080))
+    safe_fps = max(1, min(int(cfg.camera_fps), 15))
+    await asyncio.to_thread(
+        start_preview,
+        camera_device=cfg.camera_device,
+        width=safe_width,
+        height=safe_height,
+        fps=safe_fps,
+        overlay_faces=bool(faces),
+    )
+    status = await asyncio.to_thread(get_preview_status)
+    if not bool(status.get("available", True)) and not bool(status.get("running", False)):
+        raise HTTPException(status_code=503, detail=status.get("last_error", "Preview indisponivel"))
+
+    async def frame_stream():
+        while True:
+            frame = await asyncio.to_thread(preview_jpeg)
+            if frame:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii")
+                    + frame
+                    + b"\r\n"
+                )
+            await asyncio.sleep(1 / max(2, min(safe_fps, 15)))
+
+    return StreamingResponse(
+        frame_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @app.get("/api/sync/status")
