@@ -825,6 +825,8 @@ def _systemctl_value(cmd: str, service_name: str) -> str:
 
 
 _UPDATE_LOCK = threading.Lock()
+_UPDATE_STALE_QUEUED_SEC = 15
+_UPDATE_STALE_RUNNING_SEC = 7200
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -983,6 +985,65 @@ def _append_update_log(run_id: str, output: str) -> None:
         conn.commit()
 
 
+def _parse_db_datetime(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+
+
+def _recover_stale_update_state() -> bool:
+    """Reset queued/running update state if it appears stale."""
+    if _UPDATE_LOCK.locked():
+        return False
+    with get_connection() as conn:
+        state = conn.execute(
+            """
+            SELECT run_id, status, progress_pct, current_step, message, updated_at
+            FROM update_state
+            WHERE state_key = 'main'
+            """
+        ).fetchone()
+    if not state:
+        return False
+    status = str(state["status"] or "idle")
+    if status not in {"queued", "running"}:
+        return False
+    updated_at = _parse_db_datetime(state["updated_at"])
+    if updated_at is None:
+        return False
+    age_sec = (datetime.now() - updated_at).total_seconds()
+    # queued should start quickly; running can legitimately take much longer.
+    stale = (status == "queued" and age_sec > _UPDATE_STALE_QUEUED_SEC) or (
+        status == "running" and age_sec > _UPDATE_STALE_RUNNING_SEC
+    )
+    if not stale:
+        return False
+
+    run_id = str(state["run_id"] or "")
+    reason = (
+        f"Estado anterior ({status}) recuperado automaticamente por inatividade ({int(age_sec)}s)."
+    )
+    if run_id:
+        _close_update_run(
+            run_id=run_id,
+            status="error",
+            progress_pct=100,
+            current_step="stale_recovered",
+            message=reason,
+        )
+    _set_update_state(
+        run_id=run_id,
+        status="idle",
+        progress_pct=0,
+        current_step="idle",
+        message=reason,
+    )
+    return True
+
+
 def _close_update_run(
     *,
     run_id: str,
@@ -1028,6 +1089,7 @@ def get_update_history(limit: int = 10) -> list[dict[str, Any]]:
 
 
 def get_update_status(*, refresh_remote: bool = False) -> dict[str, Any]:
+    _recover_stale_update_state()
     git_info = _collect_git_update_info(refresh_remote=refresh_remote)
     with get_connection() as conn:
         state = conn.execute(
@@ -1086,6 +1148,7 @@ def get_update_status(*, refresh_remote: bool = False) -> dict[str, Any]:
 
 
 def request_system_update_run() -> dict[str, Any]:
+    _recover_stale_update_state()
     status = get_update_status(refresh_remote=False)
     if status["running"]:
         return {
@@ -1139,12 +1202,34 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
     repo = _repo_root()
     python_exec = str((repo / ".venv" / "bin" / "python")) if (repo / ".venv" / "bin" / "python").exists() else os.environ.get("PYTHON_BIN", "python3")
     pip_exec_cmd: list[str]
+    pip_fallback_cmds: list[list[str]] = []
     if (repo / ".venv" / "bin" / "pip").exists():
         pip_exec_cmd = [
             str(repo / ".venv" / "bin" / "pip"),
             "install",
             "-r",
             "requirements.txt",
+        ]
+        pip_fallback_cmds = [
+            [
+                python_exec,
+                "-m",
+                "pip",
+                "install",
+                "--break-system-packages",
+                "-r",
+                "requirements.txt",
+            ],
+            [
+                python_exec,
+                "-m",
+                "pip",
+                "install",
+                "--user",
+                "--break-system-packages",
+                "-r",
+                "requirements.txt",
+            ],
         ]
     else:
         # Debian Bookworm/Trixie may block global pip installs (PEP 668).
@@ -1156,6 +1241,20 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
             "--break-system-packages",
             "-r",
             "requirements.txt",
+        ]
+        pip_fallback_cmds = [
+            [
+                python_exec,
+                "-m",
+                "pip",
+                "install",
+                "--user",
+                "--break-system-packages",
+                "-r",
+                "requirements.txt",
+            ],
+            [python_exec, "-m", "pip", "install", "-r", "requirements.txt"],
+            [python_exec, "-m", "pip", "install", "--user", "-r", "requirements.txt"],
         ]
 
     git_info = _collect_git_update_info(refresh_remote=False)
@@ -1209,6 +1308,18 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
                 timeout=600 if step_name == "pip_install" else 180,
             )
             _append_update_log(run_id, f"$ {' '.join(cmd)}\n{out}")
+            if not ok and step_name == "pip_install":
+                # Try portable fallbacks for different Raspberry Pi Python setups.
+                for retry_cmd in pip_fallback_cmds:
+                    ok_retry, out_retry = _run_command(retry_cmd, cwd=repo, timeout=600)
+                    _append_update_log(run_id, f"$ {' '.join(retry_cmd)}\n{out_retry}")
+                    if ok_retry:
+                        ok = True
+                        out = out_retry
+                        warnings.append(
+                            "pip_install concluido via fallback de compatibilidade."
+                        )
+                        break
             if not ok:
                 if optional:
                     warnings.append(f"{step_name}: {out}")

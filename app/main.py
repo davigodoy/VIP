@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -307,7 +308,11 @@ async def api_reconciliation_run() -> JSONResponse:
     if result.get("accepted"):
         run_id = str(result.get("run_id", "")).strip()
         if run_id:
-            asyncio.create_task(asyncio.to_thread(run_reconciliation_job, run_id))
+            threading.Thread(
+                target=run_reconciliation_job,
+                args=(run_id,),
+                daemon=True,
+            ).start()
     return JSONResponse(content=result)
 
 
@@ -328,7 +333,11 @@ async def api_update_run() -> JSONResponse:
     if result.get("accepted"):
         run_id = str(result.get("run_id", "")).strip()
         if run_id:
-            asyncio.create_task(asyncio.to_thread(run_system_update_job, run_id))
+            threading.Thread(
+                target=run_system_update_job,
+                args=(run_id,),
+                daemon=True,
+            ).start()
     return JSONResponse(content=result)
 
 
