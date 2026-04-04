@@ -13,6 +13,7 @@
       <p class="help">Navegacao rapida</p>
       <nav class="menu">
         <a href="#sec-dashboard">Dashboard</a>
+        <a href="#sec-monitor">Monitor camera</a>
         <a href="#sec-cultos">Cultos</a>
         <a href="#sec-config-camera">Camera</a>
         <a href="#sec-config-etaria">Faixas etarias</a>
@@ -46,25 +47,60 @@
           <div class="metric-box"><span class="metric-label">Unicos</span><span id="m-unique" class="metric-value">-</span></div>
         </div>
 
+        <div id="sec-monitor" class="preview-monitor" data-camera-fps="{{ config.camera_fps }}">
+          <h3>Monitor da camera (preview de video)</h3>
+          <p class="help">
+            <strong>Raspberry Pi 4:</strong> alvo principal — camera USB ou modulo via V4L2 (normalmente <code>/dev/video0</code>).
+            O usuario do servico deve estar no grupo <code>video</code>. Resolucao e FPS da configuracao pesam na CPU do Pi;
+            valores moderados (ex.: 640x360, 8 FPS) sao recomendados.
+            O preview mostra <strong>só o fluxo de video</strong> (JPEG no navegador, LAN) para confirmar enquadramento e que o dispositivo responde — <strong>sem deteccao</strong> no servidor do painel, para poupar CPU no Pi.
+            Entradas, saidas, ocupacao e faixas etarias no painel vêm de <code>POST /api/events/ingest</code>, processados pelo <strong>servico/backend</strong> que corre junto da camera (edge).
+            <em>macOS (dev):</em> indices <code>0</code>/<code>1</code> ou permissao em Privacidade &gt; Camera para o app que corre o Python.
+          </p>
+          {% if not camera_preview.opencv_installed %}
+          <p class="warn">OpenCV nao esta instalado. No ambiente do app: <code>pip install opencv-python-headless</code> e reinicie o servidor.</p>
+          {% elif not camera_status.camera_enabled %}
+          <p class="help">Camera desabilitada — marque &quot;Camera habilitada&quot; na secao de configuracao abaixo.</p>
+          {% else %}
+          <p class="help" id="preview-meta">Video | FPS ~ —</p>
+          <p class="help preview-hint" id="preview-hint" hidden></p>
+          <div class="preview-frame-wrap">
+            <img id="camera-preview-img" alt="Preview da camera" class="preview-video" />
+          </div>
+          <div class="preview-actions">
+            <button type="button" id="preview-start" class="secondary">Iniciar preview</button>
+            <button type="button" id="preview-stop">Parar preview</button>
+          </div>
+          {% endif %}
+        </div>
+
         <div class="chart-grid">
           <div class="chart-card">
             <h3>Fluxo por minuto (entradas x saidas)</h3>
-            <canvas id="chart-flow" height="180"></canvas>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-flow"></canvas>
+            </div>
           </div>
           <div class="chart-card">
             <h3>Ocupacao ao longo do tempo</h3>
-            <canvas id="chart-occupancy" height="180"></canvas>
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-occupancy"></canvas>
+            </div>
           </div>
         </div>
 
         <div class="chart-grid">
           <div class="chart-card">
             <h3>Faixas etarias</h3>
-            <canvas id="chart-age" height="200"></canvas>
+            <div class="chart-canvas-wrap chart-canvas-wrap--bar">
+              <canvas id="chart-age"></canvas>
+            </div>
           </div>
           <div class="chart-card">
             <h3>Genero</h3>
-            <canvas id="chart-gender" height="200"></canvas>
+            <div class="chart-canvas-wrap chart-canvas-wrap--bar">
+              <canvas id="chart-gender"></canvas>
+            </div>
           </div>
         </div>
 
@@ -129,23 +165,31 @@
       <form method="post" action="/config/save" class="stack-form">
         <section id="sec-config-camera" class="card">
           <h2>Configuracao da camera</h2>
-          <div class="grid">
-            <label>Nome da camera<input type="text" name="camera_label" value="{{ config.camera_label }}" required /></label>
-            <label>
-              Dispositivo da camera
-              <input type="text" name="camera_device" value="{{ config.camera_device }}" list="camera-device-list" required />
-              <datalist id="camera-device-list">
-                {% for device in camera_devices %}
-                  <option value="{{ device }}"></option>
+          <input type="hidden" name="camera_device" id="camera-device-input" value="{{ config.camera_device }}" />
+          <input type="hidden" name="camera_enabled_hidden" value="{{ 1 if config.camera_enabled else 0 }}" />
+
+          <div class="camera-detect-panel">
+            <p class="help">Escolha a camera detectada. O dispositivo e <strong>gravado no servidor</strong> na hora (Linux/Pi: nomes USB/V4L2 e <code>/dev/v4l/by-id/...</code> quando existir; macOS: nomes via <strong>AVFoundation</strong> na mesma ordem do OpenCV — instale <code>pyobjc-framework-AVFoundation</code> no venv se os rotulos nao aparecerem).</p>
+            <div class="camera-select-row">
+              <select id="camera-device-select" aria-label="Cameras detectadas" class="camera-device-select">
+                <option value="">-- Selecione uma camera detectada --</option>
+                {% for cam in detected_cameras %}
+                <option value="{{ cam.id }}" {% if cam.id == config.camera_device %}selected{% endif %}>{{ cam.label }}</option>
                 {% endfor %}
-              </datalist>
-            </label>
-            <label class="checkbox"><input type="checkbox" name="camera_enabled" {% if config.camera_enabled %}checked{% endif %} />Camera habilitada</label>
+              </select>
+              <button type="button" class="secondary" id="refresh-cameras">Atualizar lista</button>
+            </div>
+            <p class="help camera-device-ack" id="camera-device-ack" hidden></p>
+          </div>
+
+          <h3 class="config-subheading">Captura, janela do culto e nome no painel</h3>
+          <div class="grid camera-config-grid">
             <label>Resolucao inferencia (largura)<input type="number" name="camera_inference_width" min="160" max="1920" value="{{ config.camera_inference_width }}" required /></label>
             <label>Resolucao inferencia (altura)<input type="number" name="camera_inference_height" min="120" max="1080" value="{{ config.camera_inference_height }}" required /></label>
             <label>FPS de processamento<input type="number" name="camera_fps" min="1" max="60" value="{{ config.camera_fps }}" required /></label>
             <label>Janela inicio do culto (min antes)<input type="number" name="culto_antecedencia_min" min="0" max="180" value="{{ config.culto_antecedencia_min }}" required /></label>
             <label>Duracao da janela do culto (min)<input type="number" name="culto_duracao_min" min="30" max="360" value="{{ config.culto_duracao_min }}" required /></label>
+            <label>Nome da camera (exibido no painel)<input type="text" name="camera_label" value="{{ config.camera_label }}" required /></label>
           </div>
         </section>
 
@@ -385,6 +429,18 @@
     const el = (id) => document.getElementById(id);
     const setText = (id, value) => { const node = el(id); if (node) node.textContent = String(value); };
 
+    /** Resolve api path against a pagina atual (evita 404 com proxy ou path-prefix). */
+    function vipUrl(path) {
+      const p = String(path).replace(/^\//, '');
+      const cur = window.location.href.split('#')[0];
+      const base = cur.endsWith('/') ? cur : cur + '/';
+      try {
+        return new URL(p, base).href;
+      } catch (e) {
+        return '/' + p;
+      }
+    }
+
     let flowChart;
     let occupancyChart;
     let ageChart;
@@ -403,6 +459,7 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          layout: { autoPadding: false, padding: { top: 4, right: 4, bottom: 4, left: 4 } },
           plugins: { legend: { position: 'bottom' } },
           scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true } }
         }
@@ -416,6 +473,7 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          layout: { autoPadding: false, padding: { top: 4, right: 4, bottom: 4, left: 4 } },
           plugins: { legend: { position: 'bottom' } },
           scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true } }
         }
@@ -432,6 +490,7 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          layout: { autoPadding: false, padding: { top: 4, right: 4, bottom: 4, left: 4 } },
           plugins: { legend: { display: false } },
           scales: { y: { beginAtZero: true } }
         }
@@ -508,7 +567,7 @@
 
     async function refreshCharts() {
       try {
-        const res = await fetch('/api/metrics/charts', { cache: 'no-store' });
+        const res = await fetch(vipUrl('api/metrics/charts'), { cache: 'no-store' });
         const data = await res.json();
         updateCharts(data);
       } catch (err) {
@@ -519,7 +578,7 @@
     async function refreshLive() {
       try {
         const liveCard = document.querySelector('.live-card');
-        const res = await fetch('/api/metrics/live', { cache: 'no-store' });
+        const res = await fetch(vipUrl('api/metrics/live'), { cache: 'no-store' });
         const data = await res.json();
         if (!data.active) {
           if (liveCard) liveCard.classList.add('live-offline');
@@ -533,17 +592,9 @@
           setText('m-returns', 0);
           setText('m-unique', 0);
           updateCharts({
-            active: false,
-            timeline: [],
-            series: {
-              entries_cumulative: [],
-              exits_cumulative: [],
-              occupancy: [],
-            },
-            distributions: {
-              age: { labels: [], values: [] },
-              gender: { labels: [], values: [] },
-            },
+            charts: { flow_per_minute: [], occupancy_series: [] },
+            age_bands: {},
+            genders: {},
           });
           return;
         }
@@ -573,7 +624,7 @@
         const out = document.getElementById('run-sync-result');
         if (out) out.textContent = 'Sincronizando...';
         try {
-          const res = await fetch('/api/sync/run', { method: 'POST' });
+          const res = await fetch(vipUrl('api/sync/run'), { method: 'POST' });
           const data = await res.json();
           if (out) out.textContent = `${data.status}: ${data.rows_synced} linhas (${data.message})`;
         } catch (err) {
@@ -581,6 +632,133 @@
         }
       });
     }
+
+    const previewImg = document.getElementById('camera-preview-img');
+    const previewMeta = document.getElementById('preview-meta');
+    const previewHintEl = document.getElementById('preview-hint');
+    let previewPollId = null;
+    let previewFrameTimer = null;
+    let previewBlobUrl = null;
+    let previewActive = false;
+
+    function cleanupPreviewVisuals() {
+      if (previewFrameTimer) {
+        clearInterval(previewFrameTimer);
+        previewFrameTimer = null;
+      }
+      if (previewPollId) {
+        clearInterval(previewPollId);
+        previewPollId = null;
+      }
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+        previewBlobUrl = null;
+      }
+      if (previewImg) {
+        previewImg.removeAttribute('src');
+        previewImg.classList.remove('is-live');
+      }
+    }
+
+    async function stopCameraPreview() {
+      previewActive = false;
+      cleanupPreviewVisuals();
+      try {
+        await fetch(vipUrl('api/camera/preview/disengage'), { method: 'POST' });
+      } catch (e) {
+        /* ignore */
+      }
+      if (previewMeta) previewMeta.textContent = 'Preview parado.';
+      if (previewHintEl) {
+        previewHintEl.textContent = '';
+        previewHintEl.hidden = true;
+      }
+    }
+
+    async function refreshPreviewMeta() {
+      if (!previewMeta) return;
+      try {
+        const res = await fetch(vipUrl('api/camera/preview/status'), { cache: 'no-store' });
+        const d = await res.json();
+        const err = d.error ? ` | estado: ${d.error}` : '';
+        previewMeta.textContent = `Video | FPS ~ ${d.fps ?? 0}${err}`;
+        if (previewHintEl) {
+          if (d.hint) {
+            previewHintEl.textContent = d.hint;
+            previewHintEl.hidden = false;
+          } else if (!d.error) {
+            previewHintEl.textContent = '';
+            previewHintEl.hidden = true;
+          }
+        }
+      } catch (e) {
+        previewMeta.textContent = 'Falha ao ler status do preview';
+      }
+    }
+
+    async function startCameraPreview() {
+      if (!previewImg || previewActive) return;
+      previewActive = true;
+      try {
+        const er = await fetch(vipUrl('api/camera/preview/engage'), { method: 'POST' });
+        if (!er.ok) {
+          let msg = `HTTP ${er.status}`;
+          try {
+            const j = await er.json();
+            if (j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+          } catch (x) {
+            msg = (await er.text()).slice(0, 200);
+          }
+          if (previewMeta) previewMeta.textContent = msg;
+          previewActive = false;
+          return;
+        }
+      } catch (e) {
+        if (previewMeta) previewMeta.textContent = 'Falha ao contactar o servidor.';
+        previewActive = false;
+        return;
+      }
+
+      previewImg.classList.add('is-live');
+      const secMon = document.getElementById('sec-monitor');
+      const cf = Number(secMon?.dataset.cameraFps);
+      const pollMs = Number.isFinite(cf) && cf > 0
+        ? Math.min(500, Math.max(80, Math.round(1000 / cf)))
+        : 125;
+
+      async function tick() {
+        try {
+          const r = await fetch(vipUrl('api/camera/preview/frame?t=' + Date.now()), { cache: 'no-store' });
+          if (!r.ok) return;
+          const blob = await r.blob();
+          if (!previewBlobUrl) {
+            previewBlobUrl = URL.createObjectURL(blob);
+            previewImg.src = previewBlobUrl;
+          } else {
+            const u = URL.createObjectURL(blob);
+            previewImg.src = u;
+            URL.revokeObjectURL(previewBlobUrl);
+            previewBlobUrl = u;
+          }
+        } catch (e) {
+          /* ignore transient */
+        }
+      }
+
+      await tick();
+      previewFrameTimer = setInterval(tick, pollMs);
+      if (previewPollId) clearInterval(previewPollId);
+      previewPollId = setInterval(refreshPreviewMeta, 1400);
+      refreshPreviewMeta();
+    }
+
+    document.getElementById('preview-start')?.addEventListener('click', () => { startCameraPreview(); });
+    document.getElementById('preview-stop')?.addEventListener('click', () => { stopCameraPreview(); });
+    window.addEventListener('beforeunload', () => {
+      previewActive = false;
+      cleanupPreviewVisuals();
+      fetch(vipUrl('api/camera/preview/disengage'), { method: 'POST', keepalive: true });
+    });
 
     function setUpdateProgress(pct) {
       const value = Math.max(0, Math.min(100, Number(pct) || 0));
@@ -624,15 +802,15 @@
     }
 
     async function refreshUpdateStatus(refreshRemote = false) {
-      const q = refreshRemote ? '?refresh_remote=1' : '';
-      const res = await fetch(`/api/update/status${q}`, { cache: 'no-store' });
+      const q = refreshRemote ? '?refresh_remote=true' : '';
+      const res = await fetch(vipUrl('api/update/status' + q), { cache: 'no-store' });
       const data = await res.json();
       updateUpdateInfo(data);
       return data;
     }
 
     async function refreshUpdateHistory() {
-      const res = await fetch('/api/update/history?limit=10', { cache: 'no-store' });
+      const res = await fetch(vipUrl('api/update/history?limit=10'), { cache: 'no-store' });
       const data = await res.json();
       renderUpdateRuns(data.runs || []);
     }
@@ -665,9 +843,27 @@
         }
         setText('update-state', 'Status: iniciando...');
         try {
-          const res = await fetch('/api/update/run', { method: 'POST' });
-          const data = await res.json();
-          setText('upd-last-msg', data.message || 'Update solicitado');
+          const res = await fetch(vipUrl('api/update/run'), { method: 'POST' });
+          const raw = await res.text();
+          let data = {};
+          try {
+            data = raw ? JSON.parse(raw) : {};
+          } catch (parseErr) {
+            setText('upd-last-msg', `Resposta invalida (HTTP ${res.status}). ${raw.slice(0, 240)}`);
+            await refreshUpdates(false);
+            return;
+          }
+          if (!res.ok) {
+            const detail = data.detail;
+            const msg = Array.isArray(detail)
+              ? detail.map((d) => d.msg || JSON.stringify(d)).join('; ')
+              : typeof detail === 'string'
+                ? detail
+                : data.message || `HTTP ${res.status}`;
+            setText('upd-last-msg', msg);
+          } else {
+            setText('upd-last-msg', data.message || 'Update solicitado');
+          }
           await refreshUpdates(false);
         } catch (err) {
           setText('upd-last-msg', 'Falha ao iniciar atualizacao');
@@ -704,7 +900,7 @@
 
     async function refreshReconciliation() {
       try {
-        const res = await fetch('/api/reconciliation/status', { cache: 'no-store' });
+        const res = await fetch(vipUrl('api/reconciliation/status'), { cache: 'no-store' });
         const data = await res.json();
         setText('reconcile-state', data.running ? 'Status: em execucao' : 'Status: ocioso');
         setReconcileProgress(data.progress_pct ?? 0);
@@ -722,7 +918,7 @@
       reconcileBtn.addEventListener('click', async () => {
         setText('reconcile-message', 'Iniciando conciliacao...');
         try {
-          const res = await fetch('/api/reconciliation/run', { method: 'POST' });
+          const res = await fetch(vipUrl('api/reconciliation/run'), { method: 'POST' });
           const data = await res.json();
           setText('reconcile-message', data.message || 'Conciliacao iniciada');
           await refreshReconciliation();
@@ -732,6 +928,116 @@
       });
     }
 
+    function bindCameraDevices() {
+      const input = document.getElementById('camera-device-input');
+      const selectEl = document.getElementById('camera-device-select');
+      const refreshBtn = document.getElementById('refresh-cameras');
+      const ack = document.getElementById('camera-device-ack');
+
+      function fillCameraSelect(cams) {
+        if (!selectEl) return;
+        const current = input ? input.value.trim() : '';
+        selectEl.replaceChildren();
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = '-- Selecione uma camera detectada --';
+        selectEl.appendChild(ph);
+        cams.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.label;
+          if (c.id === current) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+        if (current && !cams.some((c) => c.id === current)) {
+          selectEl.value = '';
+        }
+      }
+
+      async function applySelectedCamera(deviceId) {
+        if (!input || !deviceId) return;
+        input.value = deviceId;
+        if (ack) {
+          ack.hidden = false;
+          ack.classList.remove('err');
+          ack.textContent = 'Gravando dispositivo no servidor...';
+        }
+        try {
+          const postOpts = () => ({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ camera_device: deviceId }),
+          });
+          let res = await fetch(vipUrl('api/camera/device'), postOpts());
+          if (res.status === 404) {
+            res = await fetch(vipUrl('api/camera/apply-device'), postOpts());
+          }
+          if (!res.ok) {
+            let msg = 'Falha ao gravar dispositivo.';
+            try {
+              const j = await res.json();
+              if (j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+            } catch (x) {
+              msg = (await res.text()).slice(0, 200);
+            }
+            if (ack) {
+              ack.classList.add('err');
+              ack.textContent = msg;
+            }
+            return;
+          }
+          const data = await res.json();
+          const applied = data.camera_device || deviceId;
+          if (selectEl) {
+            const hit = Array.from(selectEl.options).some((o) => o.value === applied);
+            selectEl.value = hit ? applied : '';
+          }
+          if (ack) {
+            ack.classList.remove('err');
+            ack.textContent = `Ativo no servidor: ${applied}. O preview troca automaticamente em seguida.`;
+          }
+        } catch (e) {
+          if (ack) {
+            ack.classList.add('err');
+            ack.textContent = 'Erro de rede ao gravar dispositivo.';
+          }
+        }
+      }
+
+      if (selectEl && input) {
+        selectEl.addEventListener('change', () => {
+          const v = selectEl.value;
+          if (v) applySelectedCamera(v);
+        });
+      }
+
+      if (refreshBtn && selectEl && input) {
+        refreshBtn.addEventListener('click', async () => {
+          refreshBtn.disabled = true;
+          try {
+            const res = await fetch(vipUrl('api/camera/devices'), { cache: 'no-store' });
+            const data = await res.json();
+            const cams = data.cameras || [];
+            fillCameraSelect(cams);
+            if (ack && cams.length === 0) {
+              ack.hidden = false;
+              ack.classList.remove('err');
+              ack.textContent = 'Nenhuma camera na lista; verifique USB, drivers e permissoes.';
+            }
+          } catch (err) {
+            fillCameraSelect([]);
+            if (ack) {
+              ack.hidden = false;
+              ack.classList.add('err');
+              ack.textContent = 'Falha ao atualizar lista de cameras.';
+            }
+          }
+          refreshBtn.disabled = false;
+        });
+      }
+    }
+
+    bindCameraDevices();
     ensureCharts();
     refreshLive();
     refreshCharts();

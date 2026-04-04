@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import uuid
 import sqlite3
 import threading
@@ -10,6 +11,7 @@ from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
+from .camera_devices import list_detected_cameras
 from .db import get_connection
 from .models import (
     AgeBand,
@@ -134,6 +136,13 @@ def save_config(payload: RetentionConfig) -> None:
                 (key, str(int(value) if isinstance(value, bool) else value)),
             )
         conn.commit()
+
+
+def apply_camera_device(device: str) -> RetentionConfig:
+    cfg = load_config()
+    updated = cfg.model_copy(update={"camera_device": device.strip()})
+    save_config(updated)
+    return load_config()
 
 
 def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
@@ -775,7 +784,7 @@ def camera_status() -> dict[str, Any]:
 
 
 def list_camera_devices() -> list[str]:
-    return sorted(str(path) for path in Path("/dev").glob("video*"))
+    return [c["id"] for c in list_detected_cameras()]
 
 
 def systemd_status(service_name: str = "vip-dashboard.service") -> dict[str, Any]:
@@ -1107,12 +1116,11 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
         return {"status": "error", "message": "Outra atualizacao ja esta em execucao."}
 
     repo = _repo_root()
-    python_exec = str((repo / ".venv" / "bin" / "python")) if (repo / ".venv" / "bin" / "python").exists() else os.environ.get("PYTHON_BIN", "python3")
-    pip_exec_cmd: list[str]
-    if (repo / ".venv" / "bin" / "pip").exists():
-        pip_exec_cmd = [str(repo / ".venv" / "bin" / "pip"), "install", "-r", "requirements.txt"]
-    else:
-        pip_exec_cmd = [python_exec, "-m", "pip", "install", "-r", "requirements.txt"]
+    # Always use the same interpreter as this process. Preferring repo/.venv broke
+    # installs when the service ran with system python3 but a stale or foreign .venv
+    # existed (e.g. copied from another machine/architecture).
+    python_exec = sys.executable
+    pip_exec_cmd = [python_exec, "-m", "pip", "install", "-r", "requirements.txt"]
 
     git_info = _collect_git_update_info(refresh_remote=False)
     branch = str(git_info["branch"] or "").strip()

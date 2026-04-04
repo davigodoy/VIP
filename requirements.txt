@@ -4,3 +4,7 @@ jinja2
 python-multipart
 gspread
 google-auth
+opencv-python-headless
+numpy
+# Producao: Raspberry Pi / Linux — esta linha so aplica no macOS (desenvolvimento local).
+pyobjc-framework-AVFoundation; sys_platform == "darwin"

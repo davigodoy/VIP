@@ -104,6 +104,85 @@ h1 {
   background: #f9fafb;
 }
 
+.preview-monitor {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #bfdbfe;
+}
+
+.preview-frame-wrap {
+  max-width: 720px;
+  background: #0f172a;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+}
+
+.preview-video {
+  display: none;
+  width: 100%;
+  vertical-align: middle;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+}
+
+.preview-video.is-live {
+  display: block;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.camera-detect-panel {
+  margin-bottom: 14px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.camera-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: stretch;
+  margin: 10px 0 0;
+}
+
+.camera-device-select {
+  flex: 1 1 220px;
+  min-width: min(100%, 220px);
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.camera-select-row #refresh-cameras {
+  flex: 0 0 auto;
+  margin-top: 0;
+  align-self: center;
+}
+
+.camera-device-ack {
+  margin-top: 8px;
+  margin-bottom: 0;
+  color: #166534;
+}
+
+.camera-device-ack.err {
+  color: #991b1b;
+}
+
 .live-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -134,7 +213,7 @@ h1 {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
@@ -143,6 +222,8 @@ h1 {
   border-radius: 8px;
   padding: 8px;
   background: #fff;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .chart-card h3 {
@@ -151,13 +232,23 @@ h1 {
   color: #334155;
 }
 
-.chart-card canvas {
+/* Chart.js com maintainAspectRatio: false exige altura fixa no pai; senao o canvas
+   e o layout podem entrar em loop de resize e a pagina cresce indefinidamente. */
+.chart-canvas-wrap {
+  position: relative;
   width: 100%;
   height: 220px;
+  max-height: 220px;
 }
 
-.chart-card.small canvas {
-  height: 180px;
+.chart-canvas-wrap--bar {
+  height: 200px;
+  max-height: 200px;
+}
+
+.chart-canvas-wrap canvas {
+  display: block;
+  max-width: 100%;
 }
 
 .grid {
@@ -289,6 +380,29 @@ details[open] summary {
 
 .full {
   grid-column: 1 / -1;
+}
+
+.config-subheading {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 18px 0 8px;
+  color: #374151;
+}
+
+.camera-config-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 860px) {
+  .camera-config-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .camera-config-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .schedule-list {

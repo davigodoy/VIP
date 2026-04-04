@@ -175,6 +175,21 @@ ensure_user_exists() {
   fi
 }
 
+# OpenCV/V4L2 no Pi precisa ler /dev/video* — o usuario do servico deve estar em 'video'.
+ensure_video_group() {
+  if ! getent group video >/dev/null 2>&1; then
+    echo "AVISO: grupo 'video' nao encontrado (camera V4L2 pode falhar)." >&2
+    return
+  fi
+  if id -nG "$RUN_USER" | tr ' ' '\n' | grep -qx video; then
+    echo "Usuario $RUN_USER ja esta no grupo 'video'."
+    return
+  fi
+  echo "Adicionando $RUN_USER ao grupo 'video' (acesso a cameras USB / modulo Pi)..."
+  usermod -aG video "$RUN_USER"
+  echo "Reinicie o servico ou o Raspberry apos isto se a camera nao abrir: sudo systemctl restart $SERVICE_NAME"
+}
+
 install_dependencies() {
   if [[ "$SKIP_SYSTEM_DEPS" == "1" ]]; then
     echo "[1/6] Pulando dependencias de sistema (--skip-system-deps)."
@@ -292,6 +307,7 @@ print_final_status() {
 
 require_root
 ensure_user_exists
+ensure_video_group
 confirm_or_exit
 install_dependencies
 copy_project

@@ -73,6 +73,12 @@ class RetentionConfig(BaseModel):
         return self
 
 
+class CameraDeviceSelect(BaseModel):
+    """Atualiza so o dispositivo V4L2/indice usado pelo preview e pela configuracao."""
+
+    camera_device: str = Field(min_length=1, max_length=255)
+
+
 class CleanupRequest(BaseModel):
     dry_run: bool = True
 

@@ -87,6 +87,8 @@ Opcoes adicionais:
 - `--skip-system-deps`
 - `--host 0.0.0.0`
 
+**Raspberry Pi 4:** o preview no painel e apenas fluxo de video (sem deteccao local no servidor), o que reduz CPU em relacao a classificadores OpenCV no proprio Pi. Em Linux o `pip` nao instala `pyobjc-framework-AVFoundation` (so macOS). Mantenha resolucao/FPS moderados na configuracao (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
+
 Acesso remoto:
 - `http://IP_DO_RASPBERRY:8000`
 
@@ -117,6 +119,8 @@ Secao **Atualizacoes**:
 - checagem de branch/commit local/remoto e contadores ahead/behind
 - execucao de update em background
 - barra de progresso, etapa atual e historico de execucoes
+
+O job equivale, em termos de passos, ao `deploy/update_raspi.sh`: `git fetch`/`pull --ff-only`, `pip install -r requirements.txt` com o **mesmo interpretador Python** do processo do uvicorn, `compileall app`, `init_db()` e tentativa de `systemctl restart vip-dashboard.service`. Os passos de systemd sao **tolerantes a falha** (avisos no log) se o utilizador do servico nao tiver permissao para reiniciar a unidade.
 
 Observacao operacional: durante o update pode ocorrer indisponibilidade breve
 por reinicio do servico.

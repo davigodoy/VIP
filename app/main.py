@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from typing import Any
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from .db import init_db
 from .models import (
+    CameraDeviceSelect,
     EventIngestRequest,
     RetentionConfig,
     ServiceScheduleCreate,
@@ -20,6 +29,7 @@ from .models import (
     ServiceScheduleUpdate,
 )
 from .retention import (
+    apply_camera_device,
     camera_status,
     create_schedule,
     get_update_history,
@@ -43,6 +53,16 @@ from .retention import (
     systemd_status,
     update_schedule,
 )
+from .camera_devices import list_detected_cameras
+from .camera_preview import (
+    HAS_CV2,
+    get_last_jpeg,
+    get_preview_status,
+    iter_mjpeg,
+    preview_capability,
+    preview_disengage,
+    preview_engage,
+)
 from .sheets_sync import get_sync_status, sync_events_to_google_sheets
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -57,6 +77,19 @@ WEEKDAY_LABELS = {
 }
 
 logger = logging.getLogger(__name__)
+
+# Strong references so fire-and-forget thread jobs are not GC'd mid-flight.
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _schedule_thread_job(func: Callable[..., Any], *args: Any) -> None:
+    async def _runner() -> None:
+        await asyncio.to_thread(func, *args)
+
+    task = asyncio.create_task(_runner())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 app = FastAPI(title="Raspi Frequency Dashboard")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -121,10 +154,12 @@ async def dashboard(request: Request) -> HTMLResponse:
             "update_status": update_status,
             "schedules": schedules,
             "camera_devices": cameras,
+            "detected_cameras": list_detected_cameras(),
             "camera_status": cam_status,
             "systemd_status": svc_status,
             "sheets_status": sheets_status,
             "weekday_labels": WEEKDAY_LABELS,
+            "camera_preview": preview_capability(),
         },
     )
 
@@ -144,7 +179,86 @@ async def update_config(payload: RetentionConfig) -> RetentionConfig:
 async def get_camera_status() -> JSONResponse:
     status = camera_status()
     status["available_devices"] = list_camera_devices()
+    status["cameras"] = await asyncio.to_thread(list_detected_cameras)
+    status["preview"] = preview_capability()
     return JSONResponse(content=status)
+
+
+@app.get("/api/camera/devices")
+async def api_camera_devices() -> JSONResponse:
+    cameras = await asyncio.to_thread(list_detected_cameras)
+    return JSONResponse(content={"cameras": cameras})
+
+
+@app.post("/api/camera/device")
+@app.post("/api/camera/device/")
+@app.post("/api/camera/apply-device")
+async def api_apply_camera_device(payload: CameraDeviceSelect) -> JSONResponse:
+    """Grava o dispositivo na config (SQLite) para o preview e ingestao usarem na hora."""
+    cfg = await asyncio.to_thread(apply_camera_device, payload.camera_device)
+    return JSONResponse(
+        content={"ok": True, "camera_device": cfg.camera_device},
+    )
+
+
+@app.get("/api/camera/preview/status")
+async def camera_preview_status() -> JSONResponse:
+    return JSONResponse(content=get_preview_status())
+
+
+@app.post("/api/camera/preview/engage")
+async def camera_preview_engage() -> JSONResponse:
+    cfg = load_config()
+    if not cfg.camera_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Camera desabilitada na configuracao.",
+        )
+    if not HAS_CV2:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenCV nao instalado. Execute: pip install opencv-python-headless",
+        )
+    return JSONResponse(content=preview_engage())
+
+
+@app.post("/api/camera/preview/disengage")
+async def camera_preview_disengage() -> JSONResponse:
+    return JSONResponse(content=preview_disengage())
+
+
+@app.get("/api/camera/preview/frame")
+async def camera_preview_frame() -> Response:
+    cfg = load_config()
+    if not cfg.camera_enabled:
+        raise HTTPException(status_code=503, detail="Camera desabilitada.")
+    if not HAS_CV2:
+        raise HTTPException(status_code=503, detail="OpenCV nao instalado.")
+    jpeg = await asyncio.to_thread(get_last_jpeg)
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
+
+
+@app.get("/api/camera/preview/stream")
+async def camera_preview_stream(request: Request) -> StreamingResponse:
+    cfg = load_config()
+    if not cfg.camera_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Camera desabilitada na configuracao.",
+        )
+    if not HAS_CV2:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenCV nao instalado. Execute: pip install opencv-python-headless",
+        )
+    return StreamingResponse(
+        iter_mjpeg(request),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/api/sync/status")
@@ -230,13 +344,15 @@ async def api_reconciliation_run() -> JSONResponse:
     if result.get("accepted"):
         run_id = str(result.get("run_id", "")).strip()
         if run_id:
-            asyncio.create_task(asyncio.to_thread(run_reconciliation_job, run_id))
+            _schedule_thread_job(run_reconciliation_job, run_id)
     return JSONResponse(content=result)
 
 
 @app.get("/api/update/status")
-async def api_update_status(refresh_remote: int = 0) -> JSONResponse:
-    return JSONResponse(content=get_update_status(refresh_remote=bool(refresh_remote)))
+async def api_update_status(
+    refresh_remote: bool = Query(False, description="Fetch from origin before comparing commits"),
+) -> JSONResponse:
+    return JSONResponse(content=get_update_status(refresh_remote=refresh_remote))
 
 
 @app.get("/api/update/history")
@@ -251,7 +367,7 @@ async def api_update_run() -> JSONResponse:
     if result.get("accepted"):
         run_id = str(result.get("run_id", "")).strip()
         if run_id:
-            asyncio.create_task(asyncio.to_thread(run_system_update_job, run_id))
+            _schedule_thread_job(run_system_update_job, run_id)
     return JSONResponse(content=result)
 
 
@@ -268,7 +384,7 @@ async def save_config_form(
     auto_cleanup_hour: int = Form(...),
     camera_device: str = Form(...),
     camera_label: str = Form(...),
-    camera_enabled: str | None = Form(None),
+    camera_enabled_hidden: int = Form(1, ge=0, le=1),
     camera_inference_width: int = Form(...),
     camera_inference_height: int = Form(...),
     camera_fps: int = Form(...),
@@ -303,7 +419,7 @@ async def save_config_form(
             auto_cleanup_hour=auto_cleanup_hour,
             camera_device=camera_device.strip(),
             camera_label=camera_label.strip(),
-            camera_enabled=camera_enabled is not None,
+            camera_enabled=bool(camera_enabled_hidden),
             camera_inference_width=camera_inference_width,
             camera_inference_height=camera_inference_height,
             camera_fps=camera_fps,
