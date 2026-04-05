@@ -7,7 +7,7 @@ import sys
 import uuid
 import sqlite3
 import threading
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1305,6 +1305,33 @@ def resolve_active_service(event_ts: datetime) -> dict[str, Any] | None:
     return selected
 
 
+def livre_culto_id_for_date(d: date) -> str:
+    """Bucket diario para eventos fora da janela de qualquer culto agendado."""
+    return f"livre_{d.strftime('%Y%m%d')}"
+
+
+def resolve_culto_context_for_timestamp(event_ts: datetime) -> dict[str, Any]:
+    """
+    Resolve culto_id e rotulo para ingestao / painel.
+
+    Dentro da janela (inicio + antecedencia / duracao) usa o culto agendado.
+    Fora dela, agrupa no dia em `livre_YYYYMMDD` para manter contagem continua.
+    """
+    event_ts = event_ts.astimezone()
+    service = resolve_active_service(event_ts)
+    if service is not None:
+        return {
+            "culto_id": service["culto_id"],
+            "service_name": service["service_name"],
+            "scheduled": True,
+        }
+    return {
+        "culto_id": livre_culto_id_for_date(event_ts.date()),
+        "service_name": "Fora da agenda",
+        "scheduled": False,
+    }
+
+
 def _inc_age_band(stats_row: sqlite3.Row | None, age_band: AgeBand | None) -> dict[str, int]:
     current = {
         "crianca_count": int(stats_row["crianca_count"]) if stats_row else 0,
@@ -1365,11 +1392,8 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
     event_ts = payload.event_ts or datetime.now(UTC)
     event_ts = event_ts.astimezone()
     config = load_config()
-    service = resolve_active_service(event_ts)
-    if service is None:
-        raise ValueError("Nenhum culto ativo para este horario.")
-
-    culto_id = service["culto_id"]
+    ctx = resolve_culto_context_for_timestamp(event_ts)
+    culto_id = ctx["culto_id"]
     event_ts_s = event_ts.isoformat()
     event_id = str(uuid.uuid4())
     is_return = False
@@ -1574,7 +1598,8 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
     return {
         "event_id": event_id,
         "culto_id": culto_id,
-        "service_name": service["service_name"],
+        "service_name": ctx["service_name"],
+        "scheduled": ctx["scheduled"],
         "direction": payload.direction,
         "is_return": is_return,
         "is_new_unique": is_new_unique,
@@ -1585,13 +1610,14 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
 
 def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
     if culto_id is None:
-        service = resolve_active_service(datetime.now(UTC).astimezone())
-        if service is None:
-            return {"active": False}
-        culto_id = service["culto_id"]
-        service_name = service["service_name"]
+        now = datetime.now(UTC).astimezone()
+        ctx = resolve_culto_context_for_timestamp(now)
+        culto_id = ctx["culto_id"]
+        service_name = ctx["service_name"]
+        scheduled = ctx["scheduled"]
     else:
         service_name = None
+        scheduled = not str(culto_id).startswith("livre_")
 
     with get_connection() as conn:
         row = conn.execute(
@@ -1604,6 +1630,7 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
             "active": True,
             "culto_id": culto_id,
             "service_name": service_name,
+            "scheduled": scheduled,
             "entries_count": 0,
             "exits_count": 0,
             "returns_count": 0,
@@ -1628,6 +1655,7 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
         "active": True,
         "culto_id": culto_id,
         "service_name": service_name,
+        "scheduled": scheduled,
         "entries_count": int(row["entries_count"]),
         "exits_count": int(row["exits_count"]),
         "returns_count": int(row["returns_count"]),
@@ -1653,7 +1681,8 @@ def get_dashboard_charts(
     culto_id: str | None = None, window_minutes: int = 180, bucket_seconds: int = 300
 ) -> dict[str, Any]:
     safe_window = max(30, min(window_minutes, 24 * 60))
-    safe_bucket = max(30, min(bucket_seconds, 3600))
+    # Padrao 5 min para leitura de chegadas no grafico; minimo 5 min.
+    safe_bucket = max(300, min(bucket_seconds, 3600))
     live = get_live_metrics(culto_id=culto_id)
     if not live.get("active"):
         return {
@@ -1698,6 +1727,7 @@ def get_dashboard_charts(
             "active": True,
             "culto_id": resolved_culto_id,
             "service_name": live.get("service_name"),
+            "scheduled": live.get("scheduled", True),
             "window_minutes": safe_window,
             "bucket_seconds": safe_bucket,
             "charts": {
@@ -1727,6 +1757,7 @@ def get_dashboard_charts(
             "active": True,
             "culto_id": resolved_culto_id,
             "service_name": live.get("service_name"),
+            "scheduled": live.get("scheduled", True),
             "window_minutes": safe_window,
             "bucket_seconds": safe_bucket,
             "charts": {
@@ -1798,6 +1829,7 @@ def get_dashboard_charts(
         "active": True,
         "culto_id": resolved_culto_id,
         "service_name": live.get("service_name"),
+        "scheduled": live.get("scheduled", True),
         "window_minutes": safe_window,
         "bucket_seconds": safe_bucket,
         "charts": {

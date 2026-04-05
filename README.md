@@ -148,12 +148,14 @@ sudo systemctl status vip-dashboard.service
     - `age_estimate` (opcional, inteiro)
     - `gender` (opcional: `homem|mulher`)
   - regras:
-    - evento associado ao culto ativo
-    - reentrada valida apenas no mesmo culto/janela
+    - ingestao sempre aceita; dentro da janela do culto (inicio + antecedencia / duracao configuradas) o `culto_id` e o do culto agendado; fora dela usa bucket diario `livre_AAAAMMDD` (mesmo fuso do timestamp do evento)
+    - reentrada valida apenas dentro do mesmo `culto_id`
     - classificacao por `age_estimate` usa limites configurados no painel
+    - resposta inclui `scheduled` (bool) e `service_name`
 
-- `GET /api/metrics/live`
-- `GET /api/metrics/charts`
+- `GET /api/metrics/live` (sempre `active: true` no fluxo normal; `scheduled` indica se esta na janela de um culto da agenda)
+
+- `GET /api/metrics/charts` (query opcional: `window_minutes`, `bucket_seconds`; padrao bucket 300 s, minimo 300 s)
 
 ### Sincronizacao Google Sheets
 

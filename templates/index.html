@@ -54,7 +54,7 @@
             O usuario do servico deve estar no grupo <code>video</code>. Resolucao e FPS da configuracao pesam na CPU do Pi;
             valores moderados (ex.: 640x360, 8 FPS) sao recomendados.
             O preview mostra <strong>só o fluxo de video</strong> (JPEG no navegador, LAN) para confirmar enquadramento e que o dispositivo responde — <strong>sem deteccao</strong> no servidor do painel, para poupar CPU no Pi.
-            Entradas, saidas, ocupacao e faixas etarias no painel vêm de <code>POST /api/events/ingest</code>, processados pelo <strong>servico/backend</strong> que corre junto da camera (edge).
+            Entradas, saidas, ocupacao e faixas etarias no painel vêm de <code>POST /api/events/ingest</code> (sempre aceito; horario do culto só rotula o periodo quando cai na janela configurada), processados pelo <strong>servico/backend</strong> que corre junto da camera (edge).
             <em>macOS (dev):</em> indices <code>0</code>/<code>1</code> ou permissao em Privacidade &gt; Camera para o app que corre o Python.
           </p>
           {% if not camera_preview.opencv_installed %}
@@ -104,12 +104,12 @@
           </div>
         </div>
 
-        <p class="help">Culto ativo: <strong id="live-service">-</strong> (<span id="live-culto-id">-</span>)</p>
+        <p class="help">Contagem continua. Painel e graficos (faixas de 5 min) usam o contexto: <strong id="live-service">-</strong> (<span id="live-culto-id">-</span>).</p>
       </section>
 
       <section id="sec-cultos" class="card">
         <h2>Cultos (nome, dia e horario)</h2>
-        <p class="help">Cadastre os cultos para identificar corretamente os dados.</p>
+        <p class="help">Cadastre dia e horario de inicio para rotular o periodo do culto na agenda; fora dessa janela os eventos entram no bucket diario <code>livre_AAAAMMDD</code>.</p>
         <div class="schedule-list">
           {% for schedule in schedules %}
           <form method="post" action="/schedules/{{ schedule.id }}/save" class="schedule-row">
@@ -582,7 +582,7 @@
         const data = await res.json();
         if (!data.active) {
           if (liveCard) liveCard.classList.add('live-offline');
-          setText('live-status', 'Sem culto ativo no momento');
+          setText('live-status', 'Indisponivel');
           setText('live-service', '-');
           setText('live-culto-id', '-');
           setText('m-current', 0);
@@ -599,7 +599,10 @@
           return;
         }
         if (liveCard) liveCard.classList.remove('live-offline');
-        setText('live-status', 'Online');
+        setText(
+          'live-status',
+          data.scheduled === false ? 'Online (fora da janela do culto)' : 'Online'
+        );
         setText('live-service', data.service_name || '-');
         setText('live-culto-id', data.culto_id || '-');
         setText('m-current', data.current_occupancy ?? 0);

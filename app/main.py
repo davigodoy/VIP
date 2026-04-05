@@ -323,8 +323,18 @@ async def api_live_metrics(culto_id: str | None = None) -> JSONResponse:
 
 
 @app.get("/api/metrics/charts")
-async def api_metrics_charts(culto_id: str | None = None) -> JSONResponse:
-    return JSONResponse(content=get_dashboard_charts(culto_id=culto_id))
+async def api_metrics_charts(
+    culto_id: str | None = None,
+    window_minutes: int = Query(default=180, ge=30, le=24 * 60),
+    bucket_seconds: int = Query(default=300, ge=300, le=3600),
+) -> JSONResponse:
+    return JSONResponse(
+        content=get_dashboard_charts(
+            culto_id=culto_id,
+            window_minutes=window_minutes,
+            bucket_seconds=bucket_seconds,
+        )
+    )
 
 
 @app.get("/api/reconciliation/status")
