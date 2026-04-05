@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
@@ -350,12 +350,28 @@ async def api_metrics_charts(
     ),
     window_minutes: int = Query(default=180, ge=30, le=24 * 60),
     bucket_seconds: int = Query(default=300, ge=300, le=3600),
+    center: str | None = Query(
+        default=None,
+        description="ISO 8601 do instante central; janela fixa 3 h (±90 min). Omisso = ultimos window_minutes ate agora.",
+    ),
 ) -> JSONResponse:
+    center_dt: datetime | None = None
+    if center is not None and center.strip():
+        try:
+            center_dt = datetime.fromisoformat(center.strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Parametro center invalido (use ISO 8601, ex. 2026-04-05T21:30:00-03:00).",
+            ) from exc
+        if center_dt.tzinfo is None:
+            center_dt = center_dt.replace(tzinfo=UTC)
     return JSONResponse(
         content=get_dashboard_charts(
             culto_id=culto_id,
             window_minutes=window_minutes,
             bucket_seconds=bucket_seconds,
+            center=center_dt,
         )
     )
 

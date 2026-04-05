@@ -215,6 +215,7 @@ copy_project() {
 install_python_deps() {
   echo "[3/6] Instalando dependencias Python..."
   sudo -u "$RUN_USER" "$PYTHON_BIN" -m pip install -r "$INSTALL_DIR/requirements.txt" --break-system-packages
+  echo "Opcional (idade/sexo no HOG): como $RUN_USER, correr $INSTALL_DIR/scripts/download_demographics_models.sh"
 }
 
 generate_service_file() {

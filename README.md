@@ -17,7 +17,7 @@ Escopo funcional:
 - contagem de entradas e saidas (agregado **global** e, na janela da agenda, particao **por culto** com a mesma chave sintetica `report_culto_id`)
 - ocupacao atual e pico de ocupacao
 - reentrada: mesma `person_id` **na mesma particao** (`__global__` ou culto da agenda), dentro da **janela em minutos** configurada
-- distribuicoes opcionais por faixa etaria e genero (quando o **edge** envia no `ingest`; o HOG integrado nao estima)
+- distribuicoes opcionais por faixa etaria e genero (via `ingest` no **edge** ou, no Pi, via **HOG + DNN** quando os pesos OpenCV estao instalados e as opcoes **Estimar** estao ligadas)
 - sincronizacao opcional com Google Sheets
 - reconciliacao manual (no Pi ou a posteriori noutro equipamento) para recomputar
   metricas a partir dos **eventos brutos** guardados na tabela `events`
@@ -41,7 +41,7 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
 | Painel responsivo (celular / PC) | Sim |
 | Sync Google Sheets opcional | Sim |
 | Configuracao completa via web | Sim: camera, agenda, retencao, regras de envolvimento, Sheets, etc. |
-| Faixa etaria e genero (estimativas) | **Opcional via API** (`ingest`); sem modelo de idade/sexo no HOG do servidor |
+| Faixa etaria e genero (estimativas) | **Opcional:** `ingest` (edge) ou HOG no servidor com modelos em `data/opencv_dnn_models/` + flags no painel |
 | Horarios / picos de entrada | Sim: graficos de fluxo e ocupacao (janela configuravel) |
 | Conciliacao pelo navegador (outro PC/Mac) | Sim: `GET .../events` + `POST .../apply` + botoes no painel |
 | Privacidade: sem nome, IDs tecnicos | Sim: `person_id` / track, sem cadastro nominal no fluxo padrao |
@@ -54,7 +54,10 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
 - Configuracao de camera:
   - dispositivo (ex.: `/dev/video0`), nome, resolucao de inferencia e FPS
   - deteccao HOG em segundo plano opcional (`live_detection_enabled`): gera
-    entradas/saidas gravadas como os demais eventos (sem preview obrigatorio)
+    entradas/saidas gravadas como os demais eventos (sem preview obrigatorio);
+    pode acrescentar **idade/sexo aproximados** na entrada se existirem `age_net.caffemodel` /
+    `gender_net.caffemodel` (ver `data/opencv_dnn_models/README.md`) e **Estimar faixa etaria** /
+    **Estimar genero** ativos
 - Dashboard em tempo real:
   - entradas, saidas, retornos, unicos, ocupacao atual e pico
   - graficos de fluxo, ocupacao, faixa etaria e genero
@@ -128,6 +131,8 @@ Opcoes adicionais:
 - `--host 0.0.0.0`
 
 **Raspberry Pi 4:** o preview no painel e so video (JPEG). Opcionalmente, em **Configuracao da camera**, podes ligar **Deteccao automatica** (OpenCV HOG no mesmo thread de captura): corre em **segundo plano** sem abrir o preview, gera `entrada`/`saida` via a mesma logica que `ingest` — com o custo de CPU e imprecisao tipicos do HOG. Em Linux o `pip` nao instala `pyobjc-framework-AVFoundation` (so macOS). Mantenha resolucao/FPS moderados (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
+
+**Idade/sexo no HOG (opcional):** na raiz do projeto, correr `./scripts/download_demographics_models.sh` para colocar os `.caffemodel` em `data/opencv_dnn_models/`. No painel, ligue **Estimar faixa etaria** e/ou **Estimar genero** (secao Faixas etarias e genero). Cada nova **entrada** HOG recorta a caixa da pessoa, tenta detetar rosto (Haar) e corre as redes Caffe; sem rosto ou sem pesos, o evento fica sem demografia. Variavel `VIP_SKIP_DEMOGRAPHICS=1` desliga a inferencia (debug). O treino ou rotulacao manual ficam fora deste painel; a **conciliacao** existente continua a recomputar agregados a partir de `events`.
 
 Acesso remoto:
 - `http://IP_DO_RASPBERRY:8000`
@@ -215,7 +220,7 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 ### Eventos e metricas
 
 - **Deteccao no servidor (HOG):** com camera e `live_detection_enabled` ativos,
-  o processo do painel escreve na base pelo mesmo caminho que abaixo; corre **a qualquer hora** (a agenda **nao** desliga a camera nem o HOG). Por defeito `live_detection_enabled` vem **desligado** na base — ative no painel e grave. Nao e obrigatorio abrir o preview no browser.
+  o processo do painel escreve na base pelo mesmo caminho que abaixo; corre **a qualquer hora** (a agenda **nao** desliga a camera nem o HOG). Por defeito `live_detection_enabled` vem **desligado** na base — ative no painel e grave. Nao e obrigatorio abrir o preview no browser. Com pesos DNN e flags **Estimar**, as **entradas** podem incluir `age_estimate` / `gender` como no `ingest` por JSON.
 
 - `POST /api/events/ingest`
   - campos:
@@ -242,7 +247,7 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 
 - `GET /api/metrics/live` — agregados da particao escolhida: sem query `culto_id`, usa o culto **atual na agenda** se `scheduled`, senao `__global__`. Query `culto_id` forca uma particao. Inclui `involvement` (global). `culto_id` no JSON e `null` quando a particao e o agregado global. Se a particao do culto **nao tiver linha** em `service_event_stats` (comum quando houve entradas so em `__global__`, ex. fora do horario na agenda), a API devolve os totais de `__global__` com `global_stats_fallback: true` e `stats_scope: "global"` para o painel nao mostrar zeros em cima com envolvimento preenchido.
 
-- `GET /api/metrics/charts` — eventos na janela de tempo; mesma regra de particao que `live` (para um culto, filtra linhas cuja derivacao agenda+`event_ts` coincide com a particao). Quando `live` usa `global_stats_fallback`, os graficos **nao** filtram por culto na mesma janela (alinhados aos totais globais mostrados). Queries `window_minutes`, `bucket_seconds`, `culto_id` opcionais.
+- `GET /api/metrics/charts` — eventos na janela de tempo; mesma regra de particao que `live` (para um culto, filtra linhas cuja derivacao agenda+`event_ts` coincide com a particao). Quando `live` usa `global_stats_fallback`, os graficos **nao** filtram por culto na mesma janela (alinhados aos totais globais mostrados). Queries `window_minutes`, `bucket_seconds`, `culto_id` opcionais. Com query **`center`** (ISO 8601), modo **intervalo**: janela fixa de **3 horas** centrada nesse instante (±90 min); o JSON inclui `range_mode`, `window_start`, `window_end`, `summary` e demografia **so dessa janela** (unicos com entrada na janela).
 
 **Atualizacao de banco:** na primeira subida apos esta versao, uma migracao pode esvaziar `service_event_stats` e `service_event_people` e ajustar o schema; rode `POST /api/reconciliation/run` uma vez para recomputar a partir de `events`.
 

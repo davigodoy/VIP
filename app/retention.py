@@ -2086,8 +2086,14 @@ def _resolve_live_partition_id(
     return GLOBAL_STATS_ID
 
 
-def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
-    now = datetime.now(UTC).astimezone()
+def get_live_metrics(
+    culto_id: str | None = None, reference_time: datetime | None = None
+) -> dict[str, Any]:
+    now = (
+        reference_time.astimezone()
+        if reference_time is not None
+        else datetime.now(UTC).astimezone()
+    )
     display = agenda_display_context(now)
     partition = _resolve_live_partition_id(culto_id, display)
     cam_det = _camera_detection_status()
@@ -2174,16 +2180,141 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
     }
 
 
+def _parse_event_ts_iso(ts_raw: str) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone()
+
+
+def _filter_event_rows_by_chart_partition(
+    rows: list[sqlite3.Row], chart_partition: str
+) -> list[sqlite3.Row]:
+    if chart_partition == GLOBAL_STATS_ID:
+        return list(rows)
+    out: list[sqlite3.Row] = []
+    for r in rows:
+        if (
+            derive_report_culto_id_for_event_ts(str(r["event_ts"])).strip()
+            == chart_partition
+        ):
+            out.append(r)
+    return out
+
+
+def _demographics_from_window_event_rows(
+    window_rows: list[sqlite3.Row],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Unicos com pelo menos uma entrada na janela; faixa/sexo = primeiro valor visto nos eventos da janela."""
+    people: dict[str, dict[str, Any]] = {}
+    for r in window_rows:
+        pid = str(r["temp_id"] or "").strip()
+        if not pid:
+            continue
+        p = people.setdefault(
+            pid, {"entrada": False, "age_band": None, "gender": None}
+        )
+        ab = r["age_band"]
+        g = r["gender"]
+        if ab and not p["age_band"]:
+            p["age_band"] = ab
+        if g and not p["gender"]:
+            p["gender"] = g
+        if str(r["event_type"]) == "entrada":
+            p["entrada"] = True
+    age_bands = {
+        "crianca": 0,
+        "junior": 0,
+        "adolescente": 0,
+        "jovem": 0,
+        "adulto": 0,
+        "idoso": 0,
+    }
+    genders = {"homem": 0, "mulher": 0}
+    age_ok = {
+        "crianca",
+        "junior",
+        "adolescente",
+        "jovem",
+        "adulto",
+        "idoso",
+    }
+    for p in people.values():
+        if not p["entrada"]:
+            continue
+        ab = p["age_band"]
+        if ab in age_ok:
+            age_bands[str(ab)] += 1
+        ge = p["gender"]
+        if ge == "homem":
+            genders["homem"] += 1
+        elif ge == "mulher":
+            genders["mulher"] += 1
+    return age_bands, genders
+
+
+def _returns_in_window(
+    window_rows: list[sqlite3.Row], janela_reentrada_min: int
+) -> int:
+    """Reentradas na janela: entrada apos saida dentro de N minutos (mesmo temp_id)."""
+    by_pid: dict[str, list[tuple[datetime, str]]] = {}
+    for r in window_rows:
+        pid = str(r["temp_id"] or "").strip()
+        if not pid:
+            continue
+        ts = _parse_event_ts_iso(str(r["event_ts"]))
+        if ts is None:
+            continue
+        by_pid.setdefault(pid, []).append((ts, str(r["event_type"])))
+
+    returns = 0
+    for events in by_pid.values():
+        events.sort(key=lambda x: x[0])
+        last_exit: datetime | None = None
+        for ts, et in events:
+            if et == "saida":
+                last_exit = ts
+            elif et == "entrada":
+                if last_exit is not None:
+                    delta = ts - last_exit
+                    if timedelta(minutes=0) <= delta <= timedelta(
+                        minutes=janela_reentrada_min
+                    ):
+                        returns += 1
+                    last_exit = None
+                else:
+                    last_exit = None
+    return returns
+
+
 def get_dashboard_charts(
-    culto_id: str | None = None, window_minutes: int = 180, bucket_seconds: int = 300
+    culto_id: str | None = None,
+    window_minutes: int = 180,
+    bucket_seconds: int = 300,
+    center: datetime | None = None,
 ) -> dict[str, Any]:
-    safe_window = max(30, min(window_minutes, 24 * 60))
     # Padrao 5 min para leitura de chegadas no grafico; minimo 5 min.
     safe_bucket = max(300, min(bucket_seconds, 3600))
-    now = datetime.now(UTC).astimezone()
-    display = agenda_display_context(now)
+    now_wall = datetime.now(UTC).astimezone()
+    range_mode = center is not None
+    if range_mode:
+        safe_window = 180
+        ref = center.astimezone()  # type: ignore[union-attr]
+        half = timedelta(minutes=90)
+        window_start_dt = ref - half
+        window_end_dt = ref + half
+    else:
+        safe_window = max(30, min(window_minutes, 24 * 60))
+        ref = now_wall
+        window_start_dt = None
+        window_end_dt = None
+
+    display = agenda_display_context(ref)
     partition = _resolve_live_partition_id(culto_id, display)
-    live = get_live_metrics(culto_id=culto_id)
+    live = get_live_metrics(culto_id=culto_id, reference_time=ref)
     chart_partition = (
         GLOBAL_STATS_ID if live.get("global_stats_fallback") else partition
     )
@@ -2212,6 +2343,150 @@ def get_dashboard_charts(
             "genders": {"homem": 0, "mulher": 0},
         }
 
+    if range_mode:
+        assert window_start_dt is not None and window_end_dt is not None
+        cfg = load_config()
+        janela_re = int(cfg.janela_reentrada_min)
+        w_end_s = window_end_dt.isoformat()
+        tz = window_start_dt.tzinfo or UTC
+
+        with get_connection() as conn:
+            raw_rows = conn.execute(
+                """
+                SELECT event_type, event_ts, temp_id, age_band, gender
+                FROM events
+                WHERE event_ts <= ?
+                ORDER BY event_ts ASC, id ASC
+                """,
+                (w_end_s,),
+            ).fetchall()
+
+        filtered = _filter_event_rows_by_chart_partition(raw_rows, chart_partition)
+
+        occ0 = 0
+        window_rows: list[sqlite3.Row] = []
+        entries_w = 0
+        exits_w = 0
+        unique_ids: set[str] = set()
+
+        for r in filtered:
+            ts = _parse_event_ts_iso(str(r["event_ts"]))
+            if ts is None:
+                continue
+            et = str(r["event_type"])
+            if ts < window_start_dt:
+                if et == "entrada":
+                    occ0 += 1
+                elif et == "saida":
+                    occ0 = max(0, occ0 - 1)
+            elif ts <= window_end_dt:
+                window_rows.append(r)
+                if et == "entrada":
+                    entries_w += 1
+                    pid = str(r["temp_id"] or "").strip()
+                    if pid:
+                        unique_ids.add(pid)
+                elif et == "saida":
+                    exits_w += 1
+
+        age_bands_w, genders_w = _demographics_from_window_event_rows(window_rows)
+        returns_w = _returns_in_window(window_rows, janela_re)
+
+        events: list[tuple[datetime, str]] = []
+        for r in window_rows:
+            ts = _parse_event_ts_iso(str(r["event_ts"]))
+            if ts is None:
+                continue
+            events.append((ts, str(r["event_type"])))
+
+        base_epoch = int(window_start_dt.timestamp())
+        bucket_start_epoch = base_epoch - (base_epoch % safe_bucket)
+
+        buckets: dict[int, dict[str, Any]] = {}
+        occupancy = occ0
+        peak = occ0
+        for ts, direction in events:
+            epoch = int(ts.timestamp())
+            bucket_epoch = epoch - (epoch % safe_bucket)
+            info = buckets.setdefault(
+                bucket_epoch,
+                {
+                    "ts": datetime.fromtimestamp(bucket_epoch, tz).isoformat(),
+                    "entries": 0,
+                    "exits": 0,
+                    "occupancy": 0,
+                },
+            )
+            if direction == "entrada":
+                info["entries"] += 1
+                occupancy += 1
+                peak = max(peak, occupancy)
+            elif direction == "saida":
+                info["exits"] += 1
+                occupancy = max(0, occupancy - 1)
+            info["occupancy"] = occupancy
+
+        series: list[dict[str, Any]] = []
+        cursor = bucket_start_epoch
+        end_epoch = int(window_end_dt.timestamp())
+        last_occ = occ0
+        while cursor <= end_epoch:
+            slot = buckets.get(cursor)
+            if slot is None:
+                slot = {
+                    "ts": datetime.fromtimestamp(cursor, tz).isoformat(),
+                    "entries": 0,
+                    "exits": 0,
+                    "occupancy": last_occ,
+                }
+            else:
+                last_occ = int(slot["occupancy"])
+            series.append(slot)
+            cursor += safe_bucket
+
+        current_occ_end = occupancy
+
+        return {
+            "active": True,
+            "range_mode": True,
+            "center": ref.isoformat(),
+            "window_start": window_start_dt.isoformat(),
+            "window_end": window_end_dt.isoformat(),
+            "culto_id": live.get("culto_id"),
+            "report_culto_id": live.get("report_culto_id"),
+            "service_name": live.get("service_name"),
+            "scheduled": live.get("scheduled", True),
+            "window_minutes": safe_window,
+            "bucket_seconds": safe_bucket,
+            "charts": {
+                "flow_per_minute": [
+                    {
+                        "ts": item["ts"],
+                        "entries": int(item["entries"]),
+                        "exits": int(item["exits"]),
+                    }
+                    for item in series
+                ],
+                "occupancy_series": [
+                    {
+                        "ts": item["ts"],
+                        "occupancy": int(item["occupancy"]),
+                    }
+                    for item in series
+                ],
+            },
+            "summary": {
+                "entries_count": entries_w,
+                "exits_count": exits_w,
+                "returns_count": returns_w,
+                "unique_people_count": len(unique_ids),
+                "current_occupancy": current_occ_end,
+                "peak_occupancy": peak,
+            },
+            "age_bands": age_bands_w,
+            "genders": genders_w,
+        }
+
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -2233,6 +2508,7 @@ def get_dashboard_charts(
     if not rows:
         return {
             "active": True,
+            "range_mode": False,
             "culto_id": live.get("culto_id"),
             "report_culto_id": live.get("report_culto_id"),
             "service_name": live.get("service_name"),
@@ -2254,16 +2530,17 @@ def get_dashboard_charts(
             "genders": live.get("genders", {}),
         }
 
-    events: list[tuple[datetime, str]] = []
+    events_live: list[tuple[datetime, str]] = []
     for row in rows:
         try:
             ts = datetime.fromisoformat(str(row["event_ts"])).astimezone()
         except ValueError:
             continue
-        events.append((ts, str(row["event_type"])))
-    if not events:
+        events_live.append((ts, str(row["event_type"])))
+    if not events_live:
         return {
             "active": True,
+            "range_mode": False,
             "culto_id": live.get("culto_id"),
             "report_culto_id": live.get("report_culto_id"),
             "service_name": live.get("service_name"),
@@ -2285,7 +2562,7 @@ def get_dashboard_charts(
             "genders": live.get("genders", {}),
         }
 
-    first_ts = events[0][0]
+    first_ts = events_live[0][0]
     now_ts = datetime.now(first_ts.tzinfo)
     window_start = now_ts - timedelta(minutes=safe_window)
     series_start = min(first_ts, window_start)
@@ -2295,7 +2572,7 @@ def get_dashboard_charts(
     buckets: dict[int, dict[str, Any]] = {}
     occupancy = 0
     peak = 0
-    for ts, direction in events:
+    for ts, direction in events_live:
         epoch = int(ts.timestamp())
         bucket_epoch = epoch - (epoch % safe_bucket)
         info = buckets.setdefault(
@@ -2337,6 +2614,7 @@ def get_dashboard_charts(
 
     return {
         "active": True,
+        "range_mode": False,
         "culto_id": live.get("culto_id"),
         "report_culto_id": live.get("report_culto_id"),
         "service_name": live.get("service_name"),

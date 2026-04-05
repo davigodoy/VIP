@@ -11,7 +11,8 @@ from typing import Any
 
 import numpy as np
 
-from .models import EventIngestRequest
+from .demographics_opencv import estimate_demographics_optional
+from .models import EventIngestRequest, GenderBand
 from .retention import ingest_event, load_config
 
 logger = logging.getLogger(__name__)
@@ -103,22 +104,26 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     else:
         rects = out
 
-    detections: list[tuple[float, float, float]] = []
+    # (cx, cy, sz, x, y, rw, rh) em coordenadas do frame redimensionado (small)
+    detections: list[tuple[float, float, float, float, float, float, float]] = []
     if rects is not None and len(rects) > 0:
         for (_i, (x, y, rw, rh)) in enumerate(rects):
             cx = float(x + rw / 2.0)
             cy = float(y + rh / 2.0)
-            detections.append((cx, cy, float(max(rw, rh))))
+            detections.append(
+                (cx, cy, float(max(rw, rh)), float(x), float(y), float(rw), float(rh))
+            )
 
     to_exit: list[int] = []
     to_enter: list[int] = []
+    enter_rect_small: dict[int, tuple[float, float, float, float]] = {}
     with _state_lock:
         used: set[int] = set()
         for tid in list(_tracks.keys()):
             tr = _tracks[tid]
             best_i: int | None = None
             best_d = _MATCH_DIST + 1.0
-            for i, (cx, cy, _) in enumerate(detections):
+            for i, (cx, cy, *_rest) in enumerate(detections):
                 if i in used:
                     continue
                 d = math.hypot(cx - tr["cx"], cy - tr["cy"])
@@ -127,8 +132,9 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                     best_i = i
             if best_i is not None and best_d <= _MATCH_DIST:
                 used.add(best_i)
-                cx, cy, sz = detections[best_i]
+                cx, cy, sz, xs, ys, rws, rhs = detections[best_i]
                 tr["cx"], tr["cy"], tr["sz"] = cx, cy, sz
+                tr["rect_small"] = (xs, ys, rws, rhs)
                 tr["misses"] = 0
             else:
                 tr["misses"] = int(tr["misses"]) + 1
@@ -136,26 +142,73 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                     del _tracks[tid]
                     to_exit.append(tid)
 
-        for i, (cx, cy, sz) in enumerate(detections):
+        for i, (cx, cy, sz, xs, ys, rws, rhs) in enumerate(detections):
             if i in used:
                 continue
             tid = _next_tid
             _next_tid += 1
-            _tracks[tid] = {"cx": cx, "cy": cy, "sz": sz, "misses": 0}
+            rect = (xs, ys, rws, rhs)
+            _tracks[tid] = {
+                "cx": cx,
+                "cy": cy,
+                "sz": sz,
+                "misses": 0,
+                "rect_small": rect,
+            }
             to_enter.append(tid)
+            enter_rect_small[tid] = rect
 
     for tid in to_enter:
-        _emit_entrada(tid)
+        _emit_entrada(tid, frame, small_w, small_h, w, h, enter_rect_small.get(tid))
     for tid in to_exit:
         _emit_saida(tid)
 
 
-def _emit_entrada(track_id: int) -> None:
+def _emit_entrada(
+    track_id: int,
+    frame_bgr: np.ndarray,
+    small_w: int,
+    small_h: int,
+    full_w: int,
+    full_h: int,
+    rect_small: tuple[float, float, float, float] | None,
+) -> None:
     pid = f"hog_{track_id}"
+    cfg = load_config()
+    want_age = bool(cfg.estimar_faixa_etaria)
+    want_gender = bool(cfg.estimar_genero)
+    age_est: int | None = None
+    gender_band: GenderBand | None = None
+
+    if (want_age or want_gender) and rect_small is not None and HAS_CV2 and cv2 is not None:
+        sx, sy, srw, srh = rect_small
+        if small_w > 0 and small_h > 0 and full_w > 0 and full_h > 0:
+            fx = full_w / float(small_w)
+            fy = full_h / float(small_h)
+            x0 = int(sx * fx)
+            y0 = int(sy * fy)
+            x1 = int((sx + srw) * fx)
+            y1 = int((sy + srh) * fy)
+            x0 = max(0, min(x0, full_w - 1))
+            y0 = max(0, min(y0, full_h - 1))
+            x1 = max(x0 + 1, min(x1, full_w))
+            y1 = max(y0 + 1, min(y1, full_h))
+            crop = frame_bgr[y0:y1, x0:x1]
+            if crop.size > 0:
+                age_est, g = estimate_demographics_optional(
+                    crop, want_age=want_age, want_gender=want_gender
+                )
+                if g in ("homem", "mulher"):
+                    gender_band = g
+
     try:
-        ingest_event(
-            EventIngestRequest(person_id=pid, direction="entrada")
+        req = EventIngestRequest(
+            person_id=pid,
+            direction="entrada",
+            age_estimate=age_est,
+            gender=gender_band,
         )
+        ingest_event(req)
     except Exception as exc:
         logger.warning("ingest entrada falhou (%s): %s", pid, exc)
 

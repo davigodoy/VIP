@@ -295,6 +295,40 @@ h3 {
   max-width: 100%;
 }
 
+.chart-range-card {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.chart-range-card > h3 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  color: #1e293b;
+}
+
+.chart-range-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+  margin-bottom: 6px;
+}
+
+.chart-range-toolbar label {
+  font-size: 0.95rem;
+}
+
+.chart-range-toolbar input[type="datetime-local"] {
+  min-width: 14rem;
+}
+
+.chart-range-meta,
+#chart-range-summary {
+  margin-top: 4px;
+  margin-bottom: 10px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -311,6 +345,7 @@ label {
 input[type="number"],
 input[type="text"],
 input[type="time"],
+input[type="datetime-local"],
 select,
 textarea {
   padding: 10px 11px;

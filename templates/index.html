@@ -124,6 +124,47 @@
           </div>
         </div>
 
+        <div class="chart-range-card" aria-labelledby="chart-range-h">
+          <h3 id="chart-range-h">Graficos por data e hora (janela de 3 horas)</h3>
+          <p class="help">Mostra o mesmo tipo de graficos do painel, num intervalo centrado no instante escolhido: <strong>1h30 antes</strong> e <strong>1h30 depois</strong> (3h no total). A particao (culto na agenda ou global) segue o <strong>horario central</strong>, como nos graficos ao vivo. Atualizacao <strong>manual</strong> — nao acompanha o tempo real.</p>
+          <div class="chart-range-toolbar">
+            <label>Data e hora central
+              <input type="datetime-local" id="chart-range-center" step="60" />
+            </label>
+            <button type="button" id="chart-range-refresh" class="secondary">Atualizar graficos</button>
+          </div>
+          <p class="help chart-range-meta" id="chart-range-meta"></p>
+          <p class="help" id="chart-range-summary"></p>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <h3>Fluxo por minuto (entradas x saidas)</h3>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-flow-range"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <h3>Ocupacao ao longo do tempo</h3>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-occupancy-range"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <h3>Faixas etarias (na janela)</h3>
+              <div class="chart-canvas-wrap chart-canvas-wrap--bar">
+                <canvas id="chart-age-range"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <h3>Genero (na janela)</h3>
+              <div class="chart-canvas-wrap chart-canvas-wrap--bar">
+                <canvas id="chart-gender-range"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <p class="help">Totais no painel: no horario da agenda mostram o <strong>culto ativo</strong>; fora da janela, o agregado <strong>global</strong> (a deteccao HOG, se ligada, alimenta os dois conforme o horario de cada evento). Rotulo: <strong id="live-service">-</strong>. Chave: <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
       </section>
 
@@ -214,7 +255,7 @@
               <input type="checkbox" name="live_detection_enabled" {% if config.live_detection_enabled %}checked{% endif %} />
               Deteccao automatica de pessoas no servidor (HOG, 24/7 se a camera estiver ligada; nao depende da agenda nem do preview no browser)
             </label>
-            <p class="help full">Alimenta o painel pela <strong>mesma logica que <code>POST /api/events/ingest</code></strong>: entradas, saidas, ocupacao, picos e contagem de &ldquo;unicos&rdquo; (aqui cada <code>hog_*</code> e um track visual). O rotulo de culto na UI segue a <strong>agenda e a hora atual</strong>. <strong>Faixa etaria e sexo</strong> no dashboard so aumentam se o evento trouxer esses campos (o HOG nao envia). <strong>Reentrada</strong> (janela em minutos) compara com o mesmo <code>person_id</code>; como o id HOG muda quando a pessoa some do quadro, reentradas reais costumam aparecer como nova entrada — para demografia e identidade estavel use um edge com modelo proprio.</p>
+            <p class="help full">Alimenta o painel pela <strong>mesma logica que <code>POST /api/events/ingest</code></strong>: entradas, saidas, ocupacao, picos e contagem de &ldquo;unicos&rdquo; (aqui cada <code>hog_*</code> e um track visual). O rotulo de culto na UI segue a <strong>agenda e a hora atual</strong>. Com <strong>Estimar faixa etaria</strong> / <strong>Estimar genero</strong> ligados e os <strong>pesos DNN</strong> instalados no Pi (<code>data/opencv_dnn_models/</code>, ver README), cada <strong>entrada</strong> HOG tenta detetar rosto no recorte da pessoa e preencher idade/sexo (aproximados; vista de cima piora acerto). Sem pesos ou sem rosto visivel, o evento segue sem esses campos. <strong>Reentrada</strong> (janela em minutos) compara com o mesmo <code>person_id</code>; o id HOG muda quando a pessoa some do quadro — para identidade estavel prefira edge dedicado.</p>
           </div>
         </section>
 
@@ -597,6 +638,10 @@
     let occupancyChart;
     let ageChart;
     let genderChart;
+    let flowChartRange;
+    let occupancyChartRange;
+    let ageChartRange;
+    let genderChartRange;
 
     function buildLineChart(ctx, labelA, labelB) {
       return new Chart(ctx, {
@@ -747,6 +792,129 @@
         genderChart.data.datasets[0].data = [g.homem || 0, g.mulher || 0];
         genderChart.update();
       }
+    }
+
+    function ensureChartsRange() {
+      if (!window.Chart) return;
+      if (!flowChartRange) {
+        const ctx = document.getElementById('chart-flow-range');
+        if (ctx) flowChartRange = buildLineChart(ctx, 'Entradas/min', 'Saidas/min');
+      }
+      if (!occupancyChartRange) {
+        const ctx = document.getElementById('chart-occupancy-range');
+        if (ctx) occupancyChartRange = buildSingleLineChart(ctx, 'Ocupacao', '#7c3aed');
+      }
+      if (!ageChartRange) {
+        const ctx = document.getElementById('chart-age-range');
+        if (ctx) {
+          ageChartRange = buildBarChart(
+            ctx,
+            ['Crianca', 'Junior', 'Adolescente', 'Jovem', 'Adulto', 'Idoso'],
+            ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af']
+          );
+        }
+      }
+      if (!genderChartRange) {
+        const ctx = document.getElementById('chart-gender-range');
+        if (ctx) {
+          genderChartRange = buildBarChart(
+            ctx,
+            ['Homem', 'Mulher'],
+            ['#2563eb', '#ec4899']
+          );
+        }
+      }
+    }
+
+    function updateChartsRange(data) {
+      ensureChartsRange();
+      const charts = data.charts || {};
+      const flow = charts.flow_per_minute || [];
+      const occ = charts.occupancy_series || [];
+
+      if (flowChartRange) {
+        flowChartRange.data.labels = flow.map((p) => formatChartTsLabel(p.ts));
+        flowChartRange.data.datasets[0].data = flow.map((p) => p.entries || 0);
+        flowChartRange.data.datasets[1].data = flow.map((p) => p.exits || 0);
+        flowChartRange.update();
+      }
+      if (occupancyChartRange) {
+        occupancyChartRange.data.labels = occ.map((p) => formatChartTsLabel(p.ts));
+        occupancyChartRange.data.datasets[0].data = occ.map((p) => p.occupancy || 0);
+        occupancyChartRange.update();
+      }
+      if (ageChartRange) {
+        const a = data.age_bands || {};
+        ageChartRange.data.datasets[0].data = [
+          a.crianca || 0,
+          a.junior || 0,
+          a.adolescente || 0,
+          a.jovem || 0,
+          a.adulto || 0,
+          a.idoso || 0
+        ];
+        ageChartRange.update();
+      }
+      if (genderChartRange) {
+        const g = data.genders || {};
+        genderChartRange.data.datasets[0].data = [g.homem || 0, g.mulher || 0];
+        genderChartRange.update();
+      }
+    }
+
+    async function refreshChartsRange() {
+      const inp = document.getElementById('chart-range-center');
+      const meta = document.getElementById('chart-range-meta');
+      const sumEl = document.getElementById('chart-range-summary');
+      if (!inp || !inp.value) {
+        showVipToast('Escolha data e hora central.', 'error', 5000);
+        return;
+      }
+      const centerDate = new Date(inp.value);
+      if (Number.isNaN(centerDate.getTime())) {
+        showVipToast('Data ou hora invalida.', 'error', 5000);
+        return;
+      }
+      const centerIso = centerDate.toISOString();
+      const url = vipUrl(
+        `api/metrics/charts?bucket_seconds=300&center=${encodeURIComponent(centerIso)}`
+      );
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) {
+          const detail = data && data.detail != null ? data.detail : `HTTP ${res.status}`;
+          showVipToast(typeof detail === 'string' ? detail : 'Falha ao carregar graficos.', 'error', 7000);
+          if (meta) meta.textContent = '';
+          if (sumEl) sumEl.textContent = '';
+          return;
+        }
+        if (!data.range_mode) {
+          showVipToast('Servidor sem modo intervalo; atualize o VIP.', 'error', 7000);
+        }
+        updateChartsRange(data);
+        if (meta && data.window_start && data.window_end) {
+          meta.textContent = `Janela: ${formatChartTsLabel(data.window_start)} — ${formatChartTsLabel(data.window_end)} (local) · Centro: ${formatChartTsLabel(data.center || centerIso)} · ${data.service_name || ''}`;
+        }
+        const s = data.summary || {};
+        if (sumEl) {
+          const uniq = s.unique_people_count != null ? s.unique_people_count : '—';
+          sumEl.textContent = `Nesta janela: entradas ${s.entries_count ?? 0}, saidas ${s.exits_count ?? 0}, reentradas ${s.returns_count ?? 0}, unicos (com entrada) ${uniq}, pico de ocupacao ${s.peak_occupancy ?? 0}, ocupacao ao fim ${s.current_occupancy ?? 0}.`;
+        }
+      } catch (err) {
+        showVipToast('Falha de rede ao carregar graficos por data.', 'error', 7000);
+        if (meta) meta.textContent = '';
+        if (sumEl) sumEl.textContent = '';
+      }
+    }
+
+    function initChartRangePanel() {
+      const inp = document.getElementById('chart-range-center');
+      if (inp && !inp.value) {
+        const d = new Date();
+        inp.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      }
+      document.getElementById('chart-range-refresh')?.addEventListener('click', refreshChartsRange);
     }
 
     async function refreshCharts() {
@@ -1891,6 +2059,7 @@
     consumeUrlToast();
     bindCameraDevices();
     ensureCharts();
+    initChartRangePanel();
     refreshLive();
     refreshCharts();
     refreshUpdates();

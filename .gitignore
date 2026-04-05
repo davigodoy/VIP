@@ -4,7 +4,9 @@ __pycache__/
 *.pyc
 *.sqlite3
 *.db
-# Estado local (Pi / dev): nunca versionar
-data/
+# Estado local (Pi / dev): nunca versionar conteudo generico de data/
+data/*
+!data/opencv_dnn_models/
+!data/opencv_dnn_models/**
 .env
 .env.*
