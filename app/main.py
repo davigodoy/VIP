@@ -155,6 +155,7 @@ async def dashboard(request: Request) -> HTMLResponse:
         request=request,
         name="index.html",
         context={
+            "api_root": str(request.base_url).rstrip("/"),
             "config": config.model_dump(),
             "runs": runs,
             "reconciliation_runs": reconciliation_runs,
@@ -506,9 +507,12 @@ async def save_config_form(
     return RedirectResponse(url="/?toast=config_saved", status_code=303)
 
 
-@app.patch("/api/config/involvement")
+@app.api_route("/api/config/involvement", methods=["POST", "PATCH"])
 async def api_patch_involvement_rules(body: InvolvementRulesUpdate) -> JSONResponse:
-    """Grava apenas janela e limites de envolvimento (sem recarregar o formulario completo)."""
+    """Grava apenas janela e limites de envolvimento (sem recarregar o formulario completo).
+
+    Aceita POST e PATCH: alguns proxies ou caches tratam PATCH de forma estranha; POST e o padrao no painel.
+    """
 
     def _run() -> RetentionConfig:
         return update_involvement_rules(

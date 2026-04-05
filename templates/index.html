@@ -130,9 +130,9 @@
       <section id="sec-cultos" class="card">
         <h2>Cultos (nome, dia e horario)</h2>
         <p class="help">Cadastre dia e horario de inicio aproximado; o painel usa isso como <strong>rotulo</strong> e para <strong>particionar totais ao vivo</strong> quando estiver dentro da janela. Os eventos de deteccao gravam só <strong>horario</strong> (timestamp), nao um id de culto na linha do evento.</p>
-        <div class="schedule-list">
+        <div class="schedule-list" id="schedule-list-root">
           {% for schedule in schedules %}
-          <form method="post" action="/schedules/{{ schedule.id }}/save" class="schedule-row">
+          <form class="schedule-row js-schedule-form" data-schedule-id="{{ schedule.id }}">
             <input type="text" name="service_name" value="{{ schedule.service_name }}" maxlength="120" required />
             <select name="day_of_week">
               {% for idx, label in weekday_labels.items() %}
@@ -145,17 +145,17 @@
               Ativo
             </label>
             <div class="inline-actions">
-              <button type="submit">Salvar</button>
-              <button type="submit" formaction="/schedules/{{ schedule.id }}/delete" formmethod="post" class="danger">Excluir</button>
+              <button type="button" class="js-schedule-save">Salvar</button>
+              <button type="button" class="js-schedule-delete danger">Excluir</button>
             </div>
           </form>
           {% else %}
-          <p>Nenhum culto cadastrado ainda.</p>
+          <p class="schedule-empty-msg">Nenhum culto cadastrado ainda.</p>
           {% endfor %}
         </div>
 
         <h3>Adicionar novo culto</h3>
-        <form method="post" action="/schedules/create" class="grid">
+        <form id="schedule-create-form" class="grid">
           <label>
             Nome do culto
             <input type="text" name="service_name" maxlength="120" placeholder="Domingo Noite" required />
@@ -177,12 +177,12 @@
             Ativo
           </label>
           <div class="actions">
-            <button type="submit">Adicionar culto</button>
+            <button type="button" id="schedule-create-submit">Adicionar culto</button>
           </div>
         </form>
       </section>
 
-      <form method="post" action="/config/save" class="stack-form">
+      <form id="vip-config-form" class="stack-form">
         <section id="sec-config-camera" class="card">
           <h2>Configuracao da camera</h2>
           <input type="hidden" name="camera_device" id="camera-device-input" value="{{ config.camera_device }}" />
@@ -296,6 +296,7 @@
           <div class="actions">
             <button type="submit">Salvar configuracao</button>
           </div>
+          <p class="help" style="margin-top:8px;">A gravacao e feita pela API (<code>POST /api/config</code>): a pagina <strong>nao</strong> recarrega; aparece uma mensagem de confirmacao em cima.</p>
         </section>
       </form>
 
@@ -470,14 +471,8 @@
       <section class="card">
         <h2>Limpeza manual</h2>
         <div class="cleanup-actions">
-          <form method="post" action="/cleanup/run">
-            <input type="hidden" name="dry_run" value="true" />
-            <button type="submit" class="secondary">Simular limpeza (dry-run)</button>
-          </form>
-          <form method="post" action="/cleanup/run" onsubmit="return confirm('Executar limpeza real agora?');">
-            <input type="hidden" name="dry_run" value="false" />
-            <button type="submit" class="danger">Executar limpeza agora</button>
-          </form>
+          <button type="button" id="cleanup-dry-btn" class="secondary">Simular limpeza (dry-run)</button>
+          <button type="button" id="cleanup-real-btn" class="danger">Executar limpeza agora</button>
         </div>
       </section>
 
@@ -521,12 +516,19 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
+    /** Base da API calculada no servidor (evita 404 quando a URL da pagina nao e a raiz do app). */
+    const VIP_API_ROOT = {{ api_root | tojson }};
+    const VIP_WEEKDAY_LABELS = {{ weekday_labels | tojson }};
+
     const el = (id) => document.getElementById(id);
     const setText = (id, value) => { const node = el(id); if (node) node.textContent = String(value); };
 
-    /** Resolve api path against a pagina atual (evita 404 com proxy ou path-prefix). */
+    /** Resolve caminho da API (ex.: api/metrics/live) para URL absoluta. */
     function vipUrl(path) {
       const p = String(path).replace(/^\//, '');
+      if (typeof VIP_API_ROOT === 'string' && VIP_API_ROOT.length > 4) {
+        return `${VIP_API_ROOT}/${p}`;
+      }
       const cur = window.location.href.split('#')[0];
       const base = cur.endsWith('/') ? cur : cur + '/';
       try {
@@ -1501,6 +1503,10 @@
         .replace(/"/g, '&quot;');
     }
 
+    function escAttr(s) {
+      return escHtml(s);
+    }
+
     function formatVip422Detail(detail) {
       if (detail == null || detail === '') return 'Dados invalidos.';
       if (typeof detail === 'string') return detail;
@@ -1553,7 +1559,7 @@
       btn.disabled = true;
       try {
         const res = await fetch(vipUrl('api/config/involvement'), {
-          method: 'PATCH',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(body),
         });
@@ -1578,6 +1584,260 @@
         showVipToast('Falha de rede ao gravar.', 'error');
       } finally {
         btn.disabled = false;
+      }
+    }
+
+    function collectVipConfigFromForm(form) {
+      const checkNames = new Set([
+        'live_detection_enabled',
+        'estimar_faixa_etaria',
+        'estimar_genero',
+        'sync_google_sheets_enabled',
+        'auto_cleanup_enabled',
+      ]);
+      const out = {};
+      checkNames.forEach((k) => {
+        out[k] = false;
+      });
+      const controls = form.querySelectorAll('input, select, textarea');
+      for (const el of controls) {
+        if (!el.name || el.disabled) continue;
+        const n = el.name;
+        if (checkNames.has(n) && el.type === 'checkbox') {
+          out[n] = el.checked;
+          continue;
+        }
+        if (el.type === 'checkbox') continue;
+        if (n === 'camera_enabled_hidden') {
+          out.camera_enabled = el.value === '1' || el.value === 1;
+          continue;
+        }
+        if (el.type === 'number') {
+          const v = el.value.trim();
+          if (n === 'limiar_match') {
+            out[n] = v === '' ? NaN : parseFloat(v);
+          } else {
+            out[n] = v === '' ? NaN : parseInt(v, 10);
+          }
+          continue;
+        }
+        out[n] = el.value;
+      }
+      return out;
+    }
+
+    async function saveVipConfigFull() {
+      const form = document.getElementById('vip-config-form');
+      if (!form) return;
+      const submitBtn = form.querySelector('button[type="submit"]');
+      let payload;
+      try {
+        payload = collectVipConfigFromForm(form);
+      } catch (err) {
+        showVipToast('Erro ao ler o formulario.', 'error');
+        return;
+      }
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const res = await fetch(vipUrl('api/config'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error');
+          return;
+        }
+        showVipToast('Configuracao gravada.', 'success');
+        if (data.envolvimento_janela_dias != null) {
+          applyInvolvementRulesToDom(
+            data.envolvimento_janela_dias,
+            data.envolvimento_max_dias_visitante,
+            data.envolvimento_max_dias_frequentador,
+          );
+        }
+        refreshLive();
+        refreshEnvolvimento();
+        refreshCharts();
+      } catch (err) {
+        showVipToast('Falha de rede ao gravar configuracao.', 'error');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    }
+
+    function schedulePayloadFromForm(form) {
+      const sn = form.querySelector('[name="service_name"]');
+      const dow = form.querySelector('[name="day_of_week"]');
+      const st = form.querySelector('[name="start_time"]');
+      const act = form.querySelector('[name="is_active"]');
+      return {
+        service_name: (sn && sn.value ? String(sn.value) : '').trim(),
+        day_of_week: dow ? Number(dow.value) : 0,
+        start_time: st ? String(st.value || '') : '',
+        is_active: !!(act && act.checked),
+      };
+    }
+
+    function renderScheduleList(schedules) {
+      const root = document.getElementById('schedule-list-root');
+      if (!root) return;
+      const list = Array.isArray(schedules) ? schedules : [];
+      if (list.length === 0) {
+        root.innerHTML = '<p class="schedule-empty-msg">Nenhum culto cadastrado ainda.</p>';
+        return;
+      }
+      const wl = VIP_WEEKDAY_LABELS || {};
+      const idxs = Object.keys(wl).sort((a, b) => Number(a) - Number(b));
+      root.innerHTML = list
+        .map((s) => {
+          const opts = idxs
+            .map((idx) => {
+              const label = wl[idx];
+              const sel = Number(s.day_of_week) === Number(idx) ? ' selected' : '';
+              return `<option value="${escAttr(idx)}"${sel}>${escHtml(label)}</option>`;
+            })
+            .join('');
+          const id = Number(s.id);
+          const act = s.is_active ? ' checked' : '';
+          return `<form class="schedule-row js-schedule-form" data-schedule-id="${id}">
+            <input type="text" name="service_name" value="${escAttr(s.service_name || '')}" maxlength="120" required />
+            <select name="day_of_week">${opts}</select>
+            <input type="time" name="start_time" value="${escAttr(s.start_time || '')}" required />
+            <label class="checkbox inline">
+              <input type="checkbox" name="is_active"${act} />
+              Ativo
+            </label>
+            <div class="inline-actions">
+              <button type="button" class="js-schedule-save">Salvar</button>
+              <button type="button" class="js-schedule-delete danger">Excluir</button>
+            </div>
+          </form>`;
+        })
+        .join('');
+    }
+
+    function bindScheduleSection() {
+      const root = document.getElementById('schedule-list-root');
+      const createBtn = document.getElementById('schedule-create-submit');
+      const createForm = document.getElementById('schedule-create-form');
+
+      root?.addEventListener('click', async (e) => {
+        const saveBtn = e.target.closest('.js-schedule-save');
+        const delBtn = e.target.closest('.js-schedule-delete');
+        if (!saveBtn && !delBtn) return;
+        const rowForm = e.target.closest('.js-schedule-form');
+        if (!rowForm) return;
+        const sid = rowForm.getAttribute('data-schedule-id');
+        if (!sid) return;
+
+        if (saveBtn) {
+          const body = schedulePayloadFromForm(rowForm);
+          saveBtn.disabled = true;
+          try {
+            const res = await fetch(vipUrl(`api/schedules/${encodeURIComponent(sid)}`), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error');
+              return;
+            }
+            showVipToast('Culto atualizado.', 'success');
+            renderScheduleList(Array.isArray(data) ? data : []);
+          } catch (err) {
+            showVipToast('Falha de rede.', 'error');
+          } finally {
+            saveBtn.disabled = false;
+          }
+          return;
+        }
+
+        if (delBtn) {
+          if (!confirm('Excluir este culto da agenda?')) return;
+          delBtn.disabled = true;
+          try {
+            const res = await fetch(vipUrl(`api/schedules/${encodeURIComponent(sid)}`), {
+              method: 'DELETE',
+              headers: { Accept: 'application/json' },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error');
+              return;
+            }
+            showVipToast('Culto removido.', 'success');
+            renderScheduleList(Array.isArray(data) ? data : []);
+          } catch (err) {
+            showVipToast('Falha de rede.', 'error');
+          } finally {
+            delBtn.disabled = false;
+          }
+        }
+      });
+
+      createBtn?.addEventListener('click', async () => {
+        if (!createForm) return;
+        const body = schedulePayloadFromForm(createForm);
+        if (!body.service_name) {
+          showVipToast('Informe o nome do culto.', 'error');
+          return;
+        }
+        createBtn.disabled = true;
+        try {
+          const res = await fetch(vipUrl('api/schedules'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error');
+            return;
+          }
+          showVipToast('Culto adicionado.', 'success');
+          renderScheduleList(Array.isArray(data) ? data : []);
+          createForm.reset();
+          const act = createForm.querySelector('[name="is_active"]');
+          if (act) act.checked = true;
+        } catch (err) {
+          showVipToast('Falha de rede.', 'error');
+        } finally {
+          createBtn.disabled = false;
+        }
+      });
+    }
+
+    async function runCleanupAjax(dryRun) {
+      if (!dryRun && !confirm('Executar limpeza real agora?')) return;
+      const btn = document.getElementById(dryRun ? 'cleanup-dry-btn' : 'cleanup-real-btn');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(vipUrl('api/cleanup'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ dry_run: dryRun }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error');
+          return;
+        }
+        const c = data.deleted_or_would_delete || {};
+        const sum = Object.values(c).reduce((a, x) => a + (Number(x) || 0), 0);
+        showVipToast(
+          dryRun
+            ? `Simulacao concluida: ${sum} registos seriam afetados (por categoria).`
+            : `Limpeza executada: ${sum} registos removidos (por categoria).`,
+          dryRun ? 'info' : 'success',
+        );
+      } catch (err) {
+        showVipToast('Falha de rede na limpeza.', 'error');
+      } finally {
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -1619,6 +1879,14 @@
 
     document.getElementById('envolvimento-refresh')?.addEventListener('click', refreshEnvolvimento);
     document.getElementById('save-envolvimento-config')?.addEventListener('click', saveInvolvementConfig);
+
+    document.getElementById('vip-config-form')?.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      saveVipConfigFull();
+    });
+    bindScheduleSection();
+    document.getElementById('cleanup-dry-btn')?.addEventListener('click', () => runCleanupAjax(true));
+    document.getElementById('cleanup-real-btn')?.addEventListener('click', () => runCleanupAjax(false));
 
     consumeUrlToast();
     bindCameraDevices();

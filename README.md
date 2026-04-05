@@ -236,7 +236,9 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
   `visit_days`, `envolvimento` (`visitante` | `frequentador` | `membro`), `last_entrada`;
   query `limit`, `offset`. Regras e `nota_identidade` no JSON.
 
-- `PATCH /api/config/involvement` — JSON com `envolvimento_janela_dias`, `envolvimento_max_dias_visitante`, `envolvimento_max_dias_frequentador`; grava so essas chaves (o painel usa isto no botao **Salvar regras de envolvimento** sem recarregar a pagina).
+- `POST` ou `PATCH` em `/api/config/involvement` — JSON com `envolvimento_janela_dias`, `envolvimento_max_dias_visitante`, `envolvimento_max_dias_frequentador`; grava so essas chaves (o painel usa **POST** no botao **Salvar regras de envolvimento** sem recarregar a pagina).
+
+- `GET` / `POST /api/config` — leitura e gravacao do `RetentionConfig` completo em JSON; o painel usa **POST** em **Salvar configuracao** (sem recarregar a pagina). Cultos: `GET` / `POST /api/schedules`, `PUT` / `DELETE /api/schedules/{id}`. Limpeza manual: `POST /api/cleanup` com `{"dry_run": true|false}`. Os POSTs HTML antigos (`/config/save`, `/schedules/*`, `/cleanup/run`) mantem-se para compatibilidade.
 
 - `GET /api/metrics/live` — agregados da particao escolhida: sem query `culto_id`, usa o culto **atual na agenda** se `scheduled`, senao `__global__`. Query `culto_id` forca uma particao. Inclui `involvement` (global). `culto_id` no JSON e `null` quando a particao e o agregado global. Se a particao do culto **nao tiver linha** em `service_event_stats` (comum quando houve entradas so em `__global__`, ex. fora do horario na agenda), a API devolve os totais de `__global__` com `global_stats_fallback: true` e `stats_scope: "global"` para o painel nao mostrar zeros em cima com envolvimento preenchido.
 
