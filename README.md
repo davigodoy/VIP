@@ -124,7 +124,13 @@ O job equivale, em termos de passos, ao `deploy/update_raspi.sh`: `git fetch`, `
 
 **Desenvolvimento no PC:** este fluxo **apaga** commits locais nao enviados no Pi se correres update pelo painel ou `update_raspi.sh`. No laptop usa `git pull` normalmente.
 
-**Se o update falhou antes desta correcao** (merge bloqueado), no Pi como `pi`: `cd /opt/vip && git fetch origin && git clean -fd && git reset --hard origin/main` (ajusta `main` se a branch for outra).
+**Se o update falhou antes desta correcao** (merge bloqueado), no Pi (como utilizador dono do repo, normalmente `pi`):
+
+```bash
+sudo -u pi bash -c 'cd /opt/vip && git -c safe.directory=/opt/vip fetch origin main && git -c safe.directory=/opt/vip clean -fd && git -c safe.directory=/opt/vip reset --hard origin/main'
+```
+
+(ajusta `main` se a branch for outra). O `-c safe.directory=...` evita o erro **dubious ownership** quando o SSH e com outro user (ex. `admin`) mas o dono de `/opt/vip` e o `pi`. Alternativa: `git config --global --add safe.directory /opt/vip` **no utilizador que corre o git**.
 
 Observacao operacional: durante o update pode ocorrer indisponibilidade breve
 por reinicio do servico.

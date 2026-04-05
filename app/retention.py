@@ -830,6 +830,11 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _git_cmd(repo: Path, *args: str) -> list[str]:
+    """Prefixo git com safe.directory (evita 'dubious ownership' entre users, ex. admin vs pi)."""
+    return ["git", "-c", f"safe.directory={repo.resolve()}", *args]
+
+
 def _run_command(
     cmd: list[str], *, cwd: Path, timeout: int = 120
 ) -> tuple[bool, str]:
@@ -859,32 +864,38 @@ def _collect_git_update_info(*, refresh_remote: bool) -> dict[str, Any]:
     fetch_error = ""
 
     ok_branch, out_branch = _run_command(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, timeout=30
+        _git_cmd(cwd, "rev-parse", "--abbrev-ref", "HEAD"), cwd=cwd, timeout=30
     )
     if ok_branch:
         branch = out_branch.splitlines()[-1].strip()
 
-    ok_local, out_local = _run_command(["git", "rev-parse", "HEAD"], cwd=cwd, timeout=30)
+    ok_local, out_local = _run_command(_git_cmd(cwd, "rev-parse", "HEAD"), cwd=cwd, timeout=30)
     if ok_local:
         local_commit = out_local.splitlines()[-1].strip()
 
     if branch and branch != "HEAD":
         if refresh_remote:
             ok_fetch, out_fetch = _run_command(
-                ["git", "fetch", "origin", branch], cwd=cwd, timeout=120
+                _git_cmd(cwd, "fetch", "origin", branch), cwd=cwd, timeout=120
             )
             if not ok_fetch:
                 fetch_error = out_fetch
 
         ok_remote, out_remote = _run_command(
-            ["git", "rev-parse", f"origin/{branch}"], cwd=cwd, timeout=30
+            _git_cmd(cwd, "rev-parse", f"origin/{branch}"), cwd=cwd, timeout=30
         )
         if ok_remote:
             remote_commit = out_remote.splitlines()[-1].strip()
 
         if local_commit and remote_commit:
             ok_counts, out_counts = _run_command(
-                ["git", "rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"],
+                _git_cmd(
+                    cwd,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    f"HEAD...origin/{branch}",
+                ),
                 cwd=cwd,
                 timeout=30,
             )
@@ -1132,11 +1143,11 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
     branch = str(git_info["branch"] or "").strip()
     if not branch or branch == "HEAD":
         branch = "main"
-    fetch_cmd = ["git", "fetch", "origin", branch]
+    fetch_cmd = _git_cmd(repo, "fetch", "origin", branch)
     # Espelha origin: remove arquivos/dirs nao rastreados que bloqueariam checkout, depois alinha o HEAD.
     # Ignorados (.venv, data/*.db com data/ no gitignore, etc.) nao sao removidos por clean -fd.
-    clean_cmd = ["git", "clean", "-fd"]
-    reset_cmd = ["git", "reset", "--hard", f"origin/{branch}"]
+    clean_cmd = _git_cmd(repo, "clean", "-fd")
+    reset_cmd = _git_cmd(repo, "reset", "--hard", f"origin/{branch}")
 
     steps: list[tuple[str, list[str], int, bool]] = [
         ("git_fetch", fetch_cmd, 10, False),
