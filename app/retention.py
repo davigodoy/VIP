@@ -1130,12 +1130,18 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
 
     git_info = _collect_git_update_info(refresh_remote=False)
     branch = str(git_info["branch"] or "").strip()
-    pull_cmd = ["git", "pull", "--ff-only", "origin", branch] if branch and branch != "HEAD" else ["git", "pull", "--ff-only"]
-    fetch_cmd = ["git", "fetch", "origin", branch] if branch and branch != "HEAD" else ["git", "fetch", "origin"]
+    if not branch or branch == "HEAD":
+        branch = "main"
+    fetch_cmd = ["git", "fetch", "origin", branch]
+    # Espelha origin: remove arquivos/dirs nao rastreados que bloqueariam checkout, depois alinha o HEAD.
+    # Ignorados (.venv, data/*.db com data/ no gitignore, etc.) nao sao removidos por clean -fd.
+    clean_cmd = ["git", "clean", "-fd"]
+    reset_cmd = ["git", "reset", "--hard", f"origin/{branch}"]
 
     steps: list[tuple[str, list[str], int, bool]] = [
         ("git_fetch", fetch_cmd, 10, False),
-        ("git_pull", pull_cmd, 30, False),
+        ("git_clean", clean_cmd, 22, False),
+        ("git_reset_hard", reset_cmd, 35, False),
     ]
     if (repo / "requirements.txt").exists():
         steps.append(("pip_install", pip_exec_cmd, 55, False))

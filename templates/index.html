@@ -264,7 +264,7 @@
         <p id="upd-last-msg" class="help">{{ update_status.last_message or '' }}</p>
         <div class="reconcile-actions">
           <button id="run-update-check" type="button" class="secondary">Checar atualizacoes</button>
-          <button id="run-update-now" type="button">Atualizar agora (git pull + deps + restart)</button>
+          <button id="run-update-now" type="button">Atualizar agora (sync com GitHub + deps + restart)</button>
           <p id="update-state" class="help">Status: {{ 'em execucao' if update_status.running else 'ocioso' }}</p>
         </div>
         <div class="progress-wrap" aria-label="Progresso da atualizacao">

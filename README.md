@@ -101,7 +101,7 @@ sudo bash deploy/update_raspi.sh --install-dir /opt/vip --user pi
 ```
 
 Fluxo executado:
-- `git pull --ff-only`
+- `git fetch` + `git clean -fd` + `git reset --hard origin/<branch>` (espelha o remoto; descarta alteracoes locais em ficheiros rastreados e remove ficheiros/dirs nao rastreados que conflituem; **nao** apaga paths ignorados como `.venv/` e `data/`)
 - atualizacao de dependencias Python
 - validacao basica com `compileall`
 - `init_db()` para aplicar migracoes
@@ -120,7 +120,11 @@ Secao **Atualizacoes**:
 - execucao de update em background
 - barra de progresso, etapa atual e historico de execucoes
 
-O job equivale, em termos de passos, ao `deploy/update_raspi.sh`: `git fetch`/`pull --ff-only`, `pip install -r requirements.txt` com o **mesmo interpretador Python** do processo do uvicorn, `compileall app`, `init_db()` e tentativa de `systemctl restart vip-dashboard.service`. Os passos de systemd sao **tolerantes a falha** (avisos no log) se o utilizador do servico nao tiver permissao para reiniciar a unidade.
+O job equivale, em termos de passos, ao `deploy/update_raspi.sh`: `git fetch`, `git clean -fd`, `git reset --hard origin/<branch>`, `pip install -r requirements.txt` com o **mesmo interpretador Python** do processo do uvicorn, `compileall app`, `init_db()` e tentativa de `systemctl restart vip-dashboard.service`. Os passos de systemd sao **tolerantes a falha** (avisos no log) se o utilizador do servico nao tiver permissao para reiniciar a unidade.
+
+**Desenvolvimento no PC:** este fluxo **apaga** commits locais nao enviados no Pi se correres update pelo painel ou `update_raspi.sh`. No laptop usa `git pull` normalmente.
+
+**Se o update falhou antes desta correcao** (merge bloqueado), no Pi como `pi`: `cd /opt/vip && git fetch origin && git clean -fd && git reset --hard origin/main` (ajusta `main` se a branch for outra).
 
 Observacao operacional: durante o update pode ocorrer indisponibilidade breve
 por reinicio do servico.

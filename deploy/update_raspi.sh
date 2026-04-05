@@ -65,8 +65,16 @@ if ! id "$RUN_USER" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[1/5] Atualizando codigo (git pull)..."
-sudo -u "$RUN_USER" git -C "$INSTALL_DIR" pull --ff-only
+echo "[1/5] Atualizando codigo (fetch + limpar nao rastreados + reset para origin)..."
+# pull --ff-only falha com modificacoes locais ou arquivos soltos que conflitam com o repo.
+# Em instalacao tipo appliance, o codigo deve espelhar o GitHub; dados ficam em data/ (gitignore).
+BRANCH=$(sudo -u "$RUN_USER" git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+if [[ -z "$BRANCH" || "$BRANCH" == "HEAD" ]]; then
+  BRANCH="main"
+fi
+sudo -u "$RUN_USER" git -C "$INSTALL_DIR" fetch origin "$BRANCH"
+sudo -u "$RUN_USER" git -C "$INSTALL_DIR" clean -fd
+sudo -u "$RUN_USER" git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
 
 echo "[2/5] Instalando/atualizando dependencias Python..."
 if [[ -x "$INSTALL_DIR/.venv/bin/pip" ]]; then
