@@ -1,19 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 INSTALL_DIR="/opt/vip"
 RUN_USER="pi"
 PYTHON_BIN="python3"
 SKIP_RESTART=0
+USE_HERE=0
+USER_EXPLICIT=0
 
 usage() {
   cat <<'EOF'
 Uso:
   sudo bash deploy/update_raspi.sh [opcoes]
 
+  # Instalacao em /opt/vip (service systemd, user pi):
+  sudo bash deploy/update_raspi.sh
+
+  # Clone em home (ex.: /home/admin/VIP), SSH como admin:
+  cd /home/admin/VIP && sudo bash deploy/update_raspi.sh --here
+
+  # So atualizar codigo em home sem reiniciar o service (producao em /opt/vip):
+  sudo bash deploy/update_raspi.sh --here --skip-restart
+
 Opcoes:
-  --install-dir DIR      Diretorio de instalacao (padrao: /opt/vip)
-  --user USER            Usuario dono da aplicacao (padrao: pi)
+  --here                 Usa este repositorio (pai de deploy/) como INSTALL_DIR;
+                         com sudo a partir de um login normal, RUN_USER fica SUDO_USER (ex. admin).
+  --install-dir DIR      Diretorio de instalacao (padrao: /opt/vip; ignorado se --here veio antes)
+  --user USER            Usuario dono da aplicacao (padrao: pi; sobrescreve o deduzido por --here)
   --python-bin BIN       Python para instalar deps (padrao: python3)
   --skip-restart         Nao reinicia o service no final
   -h, --help             Mostra ajuda
@@ -22,12 +38,19 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --here)
+      USE_HERE=1
+      INSTALL_DIR="$REPO_ROOT"
+      shift
+      ;;
     --install-dir)
       INSTALL_DIR="$2"
+      USE_HERE=0
       shift 2
       ;;
     --user)
       RUN_USER="$2"
+      USER_EXPLICIT=1
       shift 2
       ;;
     --python-bin)
@@ -49,6 +72,18 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$USE_HERE" -eq 1 ]]; then
+  INSTALL_DIR="$REPO_ROOT"
+  if [[ "$USER_EXPLICIT" -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
+    RUN_USER="$SUDO_USER"
+  fi
+  if [[ "$USER_EXPLICIT" -eq 0 ]] && [[ "$RUN_USER" == "pi" ]] && [[ "$INSTALL_DIR" != "/opt/vip" ]]; then
+    echo "Com --here, corre como: sudo bash deploy/update_raspi.sh --here"
+    echo "(assim RUN_USER fica o teu login, ex. admin) ou passa explicitamente: --here --user admin"
+    exit 1
+  fi
+fi
 
 if [[ $EUID -ne 0 ]]; then
   echo "Execute como root: sudo bash deploy/update_raspi.sh"

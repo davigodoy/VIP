@@ -100,6 +100,15 @@ Acesso remoto:
 sudo bash deploy/update_raspi.sh --install-dir /opt/vip --user pi
 ```
 
+**Clone em `/home/admin/VIP` (SSH como `admin`):** a partir da raiz do repo:
+
+```bash
+cd /home/admin/VIP
+sudo bash deploy/update_raspi.sh --here
+```
+
+`--here` usa este diretorio como instalacao e, com `sudo`, associa o Git/pip ao utilizador `SUDO_USER` (ex.: `admin`), evitando *dubious ownership*. O `safe.directory` ja vai no script.
+
 Fluxo executado:
 - `git fetch` + `git clean -fd` + `git reset --hard origin/<branch>` (espelha o remoto; descarta alteracoes locais em ficheiros rastreados e remove ficheiros/dirs nao rastreados que conflituem; **nao** apaga paths ignorados como `.venv/` e `data/`)
 - atualizacao de dependencias Python
