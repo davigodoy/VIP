@@ -148,14 +148,16 @@ sudo systemctl status vip-dashboard.service
     - `age_estimate` (opcional, inteiro)
     - `gender` (opcional: `homem|mulher`)
   - regras:
-    - ingestao sempre aceita; dentro da janela do culto (inicio + antecedencia / duracao configuradas) o `culto_id` e o do culto agendado; fora dela usa bucket diario `livre_AAAAMMDD` (mesmo fuso do timestamp do evento)
-    - reentrada valida apenas dentro do mesmo `culto_id`
+    - eventos gravam só fluxo e `event_ts`; `culto_id` no banco fica sempre `NULL` (horario cadastrado nao particiona dados operacionais)
+    - reentrada usa `janela_reentrada_min` no estado global por `person_id`
     - classificacao por `age_estimate` usa limites configurados no painel
-    - resposta inclui `scheduled` (bool) e `service_name`
+    - resposta inclui `culto_id: null`, `report_culto_id` (chave sintetica se o instante cair na janela da agenda), `scheduled` e `service_name` (rotulos para UI / relatorios)
 
-- `GET /api/metrics/live` (sempre `active: true` no fluxo normal; `scheduled` indica se esta na janela de um culto da agenda)
+- `GET /api/metrics/live` — agregados do registro `__global__` em `service_event_stats`; `scheduled` / `report_culto_id` vêm só da agenda (exibicao)
 
-- `GET /api/metrics/charts` (query opcional: `window_minutes`, `bucket_seconds`; padrao bucket 300 s, minimo 300 s)
+- `GET /api/metrics/charts` — todos os eventos na janela de tempo; query opcional `window_minutes`, `bucket_seconds` (padrao 300 s, minimo 300 s); parametro `culto_id` ignorado (legado)
+
+**Atualizacao de banco:** na primeira subida apos esta versao, uma migracao pode esvaziar `service_event_stats` e `service_event_people` e ajustar o schema; rode `POST /api/reconciliation/run` uma vez para recomputar a partir de `events`.
 
 ### Sincronizacao Google Sheets
 

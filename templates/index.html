@@ -104,12 +104,12 @@
           </div>
         </div>
 
-        <p class="help">Contagem continua. Painel e graficos (faixas de 5 min) usam o contexto: <strong id="live-service">-</strong> (<span id="live-culto-id">-</span>).</p>
+        <p class="help">Contagem continua (global). Rotulo da agenda: <strong id="live-service">-</strong>. Chave sintetica para relatorios (se couber na janela): <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
       </section>
 
       <section id="sec-cultos" class="card">
         <h2>Cultos (nome, dia e horario)</h2>
-        <p class="help">Cadastre dia e horario de inicio para rotular o periodo do culto na agenda; fora dessa janela os eventos entram no bucket diario <code>livre_AAAAMMDD</code>.</p>
+        <p class="help">Cadastre dia e horario de inicio aproximado; o painel usa isso só como <strong>rotulo</strong> (e para dicas em exportacoes). Contagem e eventos no banco sao globais, por timestamp.</p>
         <div class="schedule-list">
           {% for schedule in schedules %}
           <form method="post" action="/schedules/{{ schedule.id }}/save" class="schedule-row">
@@ -604,7 +604,7 @@
           data.scheduled === false ? 'Online (fora da janela do culto)' : 'Online'
         );
         setText('live-service', data.service_name || '-');
-        setText('live-culto-id', data.culto_id || '-');
+        setText('live-culto-id', data.report_culto_id || '-');
         setText('m-current', data.current_occupancy ?? 0);
         setText('m-peak', data.peak_occupancy ?? 0);
         setText('m-entries', data.entries_count ?? 0);

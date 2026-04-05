@@ -80,7 +80,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id TEXT NOT NULL UNIQUE,
-                culto_id TEXT NOT NULL,
+                culto_id TEXT,
                 profile_id TEXT,
                 temp_id TEXT,
                 event_type TEXT NOT NULL,
@@ -123,20 +123,17 @@ def init_db() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS service_event_people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                culto_id TEXT NOT NULL,
-                person_id TEXT NOT NULL,
+                person_id TEXT NOT NULL PRIMARY KEY,
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 entries_count INTEGER NOT NULL DEFAULT 0,
                 exits_count INTEGER NOT NULL DEFAULT 0,
                 returns_count INTEGER NOT NULL DEFAULT 0,
                 age_band TEXT,
-                gender TEXT
+                gender TEXT,
+                last_direction TEXT NOT NULL DEFAULT 'entrada',
+                last_exit_at TEXT
             );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_service_event_people_unique
-            ON service_event_people (culto_id, person_id);
 
             CREATE TABLE IF NOT EXISTS service_event_stats (
                 culto_id TEXT PRIMARY KEY,
@@ -259,7 +256,75 @@ def init_db() -> None:
         conn.commit()
 
 
+def _migrate_global_operational_schema(conn: sqlite3.Connection) -> None:
+    """
+    Eventos deixam de persistir culto_id; estado ao vivo e por pessoa sao globais.
+    Executa uma vez quando detecta schema legado (NOT NULL em events.culto_id ou
+    service_event_people.culto_id).
+    """
+    ev_info = {
+        row["name"]: row for row in conn.execute("PRAGMA table_info(events)").fetchall()
+    }
+    people_info = list(conn.execute("PRAGMA table_info(service_event_people)").fetchall())
+    people_names = {row["name"] for row in people_info}
+
+    migrate_events = "culto_id" in ev_info and int(ev_info["culto_id"]["notnull"]) == 1
+    migrate_people = "culto_id" in people_names
+
+    if not migrate_events and not migrate_people:
+        return
+
+    if migrate_events:
+        conn.executescript(
+            """
+            CREATE TABLE events__mg (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                culto_id TEXT,
+                profile_id TEXT,
+                temp_id TEXT,
+                event_type TEXT NOT NULL,
+                event_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                age_band TEXT,
+                gender TEXT
+            );
+            INSERT INTO events__mg (
+                id, event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender
+            )
+            SELECT id, event_id, NULL, profile_id, temp_id, event_type, event_ts, age_band, gender
+            FROM events;
+            DROP TABLE events;
+            ALTER TABLE events__mg RENAME TO events;
+            """
+        )
+
+    if migrate_people:
+        conn.execute("DROP INDEX IF EXISTS idx_service_event_people_unique")
+        conn.executescript(
+            """
+            CREATE TABLE service_event_people__mg (
+                person_id TEXT NOT NULL PRIMARY KEY,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                entries_count INTEGER NOT NULL DEFAULT 0,
+                exits_count INTEGER NOT NULL DEFAULT 0,
+                returns_count INTEGER NOT NULL DEFAULT 0,
+                age_band TEXT,
+                gender TEXT,
+                last_direction TEXT NOT NULL DEFAULT 'entrada',
+                last_exit_at TEXT
+            );
+            DROP TABLE service_event_people;
+            ALTER TABLE service_event_people__mg RENAME TO service_event_people;
+            """
+        )
+
+    conn.execute("DELETE FROM service_event_stats")
+
+
 def _run_migrations(conn: sqlite3.Connection) -> None:
+    _migrate_global_operational_schema(conn)
+
     event_cols = {
         row["name"] for row in conn.execute("PRAGMA table_info(events)").fetchall()
     }

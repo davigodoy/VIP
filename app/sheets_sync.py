@@ -9,7 +9,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from .db import get_connection
-from .retention import load_config
+from .retention import derive_report_culto_id_for_event_ts, load_config
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -94,7 +94,7 @@ def sync_events_to_google_sheets(limit: int = 500) -> dict[str, Any]:
             [
                 str(r["id"]),
                 r["event_id"],
-                r["culto_id"],
+                derive_report_culto_id_for_event_ts(str(r["event_ts"])),
                 r["temp_id"] or "",
                 r["event_type"],
                 r["event_ts"],

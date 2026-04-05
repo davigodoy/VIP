@@ -7,7 +7,7 @@ import sys
 import uuid
 import sqlite3
 import threading
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,9 @@ from .models import (
     ServiceScheduleOut,
     ServiceScheduleUpdate,
 )
+
+# Agregados ao vivo e fila de pessoas: um unico registro (culto na agenda e so para exibicao/consulta).
+GLOBAL_STATS_ID = "__global__"
 
 
 def _to_bool(value: str) -> bool:
@@ -407,10 +410,9 @@ def run_reconciliation_job(run_id: str) -> dict[str, Any]:
         with get_connection() as conn:
             event_rows = conn.execute(
                 """
-                SELECT culto_id, temp_id, event_type, event_ts, age_band, gender
+                SELECT temp_id, event_type, event_ts, age_band, gender
                 FROM events
-                WHERE culto_id IS NOT NULL
-                ORDER BY culto_id ASC, event_ts ASC, id ASC
+                ORDER BY event_ts ASC, id ASC
                 """
             ).fetchall()
 
@@ -422,212 +424,216 @@ def run_reconciliation_job(run_id: str) -> dict[str, Any]:
             processed_events=0,
             total_events=total_rows,
             processed_services=0,
-            total_services=0,
-            message="Iniciando recomputo de métricas...",
+            total_services=1,
+            message="Iniciando recomputo de métricas (fluxo global)...",
         )
 
-        groups: dict[str, list[sqlite3.Row]] = {}
-        for row in event_rows:
-            groups.setdefault(str(row["culto_id"]), []).append(row)
-
-        touched_cultos = len(groups)
-        changed_rows = 0
+        entry_seen: set[str] = set()
+        people: dict[str, dict[str, Any]] = {}
+        entries = 0
+        exits = 0
+        returns = 0
+        unique = 0
+        occupancy = 0
+        peak = 0
+        age_counts = {
+            "crianca_count": 0,
+            "junior_count": 0,
+            "adolescente_count": 0,
+            "jovem_count": 0,
+            "adulto_count": 0,
+            "idoso_count": 0,
+        }
+        gender_counts = {"homem_count": 0, "mulher_count": 0}
         processed = 0
-        with get_connection() as conn:
-            for index, (culto_id, rows) in enumerate(groups.items(), start=1):
-                entry_seen: set[str] = set()
-                people: dict[str, dict[str, Any]] = {}
-                entries = 0
-                exits = 0
-                returns = 0
-                unique = 0
-                occupancy = 0
-                peak = 0
-                age_counts = {
-                    "crianca_count": 0,
-                    "junior_count": 0,
-                    "adolescente_count": 0,
-                    "jovem_count": 0,
-                    "adulto_count": 0,
-                    "idoso_count": 0,
+
+        for row in event_rows:
+            processed += 1
+            person_id = (row["temp_id"] or "").strip()
+            if not person_id:
+                continue
+            direction = row["event_type"]
+            event_ts_s = row["event_ts"]
+            try:
+                event_dt = datetime.fromisoformat(event_ts_s)
+            except ValueError:
+                event_dt = None
+            person = people.get(person_id)
+            if person is None:
+                person = {
+                    "first_seen_at": event_ts_s,
+                    "last_seen_at": event_ts_s,
+                    "entries_count": 0,
+                    "exits_count": 0,
+                    "returns_count": 0,
+                    "age_band": row["age_band"] or None,
+                    "gender": row["gender"] or None,
+                    "last_direction": direction,
+                    "last_exit_at": event_ts_s if direction == "saida" else None,
                 }
-                gender_counts = {"homem_count": 0, "mulher_count": 0}
+                people[person_id] = person
 
-                for row in rows:
-                    processed += 1
-                    person_id = (row["temp_id"] or "").strip()
-                    if not person_id:
-                        continue
-                    direction = row["event_type"]
-                    event_ts_s = row["event_ts"]
-                    try:
-                        event_dt = datetime.fromisoformat(event_ts_s)
-                    except ValueError:
-                        event_dt = None
-                    person = people.get(person_id)
-                    if person is None:
-                        person = {
-                            "first_seen_at": event_ts_s,
-                            "last_seen_at": event_ts_s,
-                            "entries_count": 0,
-                            "exits_count": 0,
-                            "returns_count": 0,
-                            "age_band": row["age_band"] or None,
-                            "gender": row["gender"] or None,
-                            "last_direction": direction,
-                            "last_exit_at": event_ts_s if direction == "saida" else None,
-                        }
-                        people[person_id] = person
+            person["last_seen_at"] = event_ts_s
+            if not person["age_band"] and row["age_band"]:
+                person["age_band"] = row["age_band"]
+            if not person["gender"] and row["gender"]:
+                person["gender"] = row["gender"]
 
-                    person["last_seen_at"] = event_ts_s
-                    if not person["age_band"] and row["age_band"]:
-                        person["age_band"] = row["age_band"]
-                    if not person["gender"] and row["gender"]:
-                        person["gender"] = row["gender"]
+            if direction == "entrada":
+                entries += 1
+                occupancy += 1
+                if person_id not in entry_seen:
+                    unique += 1
+                    entry_seen.add(person_id)
+                    if person["age_band"] in {
+                        "crianca",
+                        "junior",
+                        "adolescente",
+                        "jovem",
+                        "adulto",
+                        "idoso",
+                    }:
+                        age_counts[f"{person['age_band']}_count"] += 1
+                    if person["gender"] in {"homem", "mulher"}:
+                        gender_counts[f"{person['gender']}_count"] += 1
 
-                    if direction == "entrada":
-                        entries += 1
-                        occupancy += 1
-                        if person_id not in entry_seen:
-                            unique += 1
-                            entry_seen.add(person_id)
-                            if person["age_band"] in {"crianca", "junior", "adolescente", "jovem", "adulto", "idoso"}:
-                                age_counts[f"{person['age_band']}_count"] += 1
-                            if person["gender"] in {"homem", "mulher"}:
-                                gender_counts[f"{person['gender']}_count"] += 1
-
-                        if (
-                            person["last_direction"] == "saida"
-                            and person["last_exit_at"]
-                            and event_dt is not None
-                        ):
-                            try:
-                                delta = event_dt - datetime.fromisoformat(person["last_exit_at"])
-                                if timedelta(minutes=0) <= delta <= timedelta(minutes=cfg.janela_reentrada_min):
-                                    returns += 1
-                                    person["returns_count"] += 1
-                            except ValueError:
-                                pass
-                        person["entries_count"] += 1
-                        person["last_direction"] = "entrada"
-                        peak = max(peak, occupancy)
-                    elif direction == "saida":
-                        exits += 1
-                        occupancy = max(0, occupancy - 1)
-                        person["exits_count"] += 1
-                        person["last_direction"] = "saida"
-                        person["last_exit_at"] = event_ts_s
-
-                if total_rows > 0 and (processed % 100 == 0 or index == touched_cultos):
-                    pct = min(95, int((processed / total_rows) * 100))
-                    _set_reconciliation_state(
-                        run_id=run_id,
-                        status="running",
-                        progress_pct=pct,
-                        processed_events=processed,
-                        total_events=total_rows,
-                        processed_services=index,
-                        total_services=touched_cultos,
-                        message=f"Reprocessando culto {index}/{touched_cultos}...",
-                    )
-
-                current_row = conn.execute(
-                    "SELECT * FROM service_event_stats WHERE culto_id = ?",
-                    (culto_id,),
-                ).fetchone()
-                next_row = {
-                    "entries_count": entries,
-                    "exits_count": exits,
-                    "returns_count": returns,
-                    "unique_people_count": unique,
-                    "current_occupancy": max(0, occupancy),
-                    "peak_occupancy": max(0, peak),
-                    **age_counts,
-                    **gender_counts,
-                }
-                if current_row is None or any(
-                    int(current_row[key]) != int(value) for key, value in next_row.items()
+                if (
+                    person["last_direction"] == "saida"
+                    and person["last_exit_at"]
+                    and event_dt is not None
                 ):
-                    changed_rows += 1
+                    try:
+                        delta = event_dt - datetime.fromisoformat(
+                            person["last_exit_at"]
+                        )
+                        if timedelta(minutes=0) <= delta <= timedelta(
+                            minutes=cfg.janela_reentrada_min
+                        ):
+                            returns += 1
+                            person["returns_count"] += 1
+                    except ValueError:
+                        pass
+                person["entries_count"] += 1
+                person["last_direction"] = "entrada"
+                peak = max(peak, occupancy)
+            elif direction == "saida":
+                exits += 1
+                occupancy = max(0, occupancy - 1)
+                person["exits_count"] += 1
+                person["last_direction"] = "saida"
+                person["last_exit_at"] = event_ts_s
 
-                conn.execute(
+            if total_rows > 0 and processed % 100 == 0:
+                pct = min(95, int((processed / total_rows) * 100))
+                _set_reconciliation_state(
+                    run_id=run_id,
+                    status="running",
+                    progress_pct=pct,
+                    processed_events=processed,
+                    total_events=total_rows,
+                    processed_services=1,
+                    total_services=1,
+                    message=f"Reprocessando eventos {processed}/{total_rows}...",
+                )
+
+        touched_cultos = 1
+        changed_rows = 0
+        with get_connection() as conn:
+            conn.execute("DELETE FROM service_event_stats WHERE culto_id != ?", (GLOBAL_STATS_ID,))
+
+            current_row = conn.execute(
+                "SELECT * FROM service_event_stats WHERE culto_id = ?",
+                (GLOBAL_STATS_ID,),
+            ).fetchone()
+            next_row = {
+                "entries_count": entries,
+                "exits_count": exits,
+                "returns_count": returns,
+                "unique_people_count": unique,
+                "current_occupancy": max(0, occupancy),
+                "peak_occupancy": max(0, peak),
+                **age_counts,
+                **gender_counts,
+            }
+            if current_row is None or any(
+                int(current_row[key]) != int(value) for key, value in next_row.items()
+            ):
+                changed_rows += 1
+
+            conn.execute(
+                """
+                INSERT INTO service_event_stats (
+                    culto_id, entries_count, exits_count, returns_count, unique_people_count,
+                    current_occupancy, peak_occupancy, crianca_count, junior_count,
+                    adolescente_count, jovem_count, adulto_count, idoso_count,
+                    homem_count, mulher_count, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(culto_id) DO UPDATE SET
+                    entries_count = excluded.entries_count,
+                    exits_count = excluded.exits_count,
+                    returns_count = excluded.returns_count,
+                    unique_people_count = excluded.unique_people_count,
+                    current_occupancy = excluded.current_occupancy,
+                    peak_occupancy = excluded.peak_occupancy,
+                    crianca_count = excluded.crianca_count,
+                    junior_count = excluded.junior_count,
+                    adolescente_count = excluded.adolescente_count,
+                    jovem_count = excluded.jovem_count,
+                    adulto_count = excluded.adulto_count,
+                    idoso_count = excluded.idoso_count,
+                    homem_count = excluded.homem_count,
+                    mulher_count = excluded.mulher_count,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    GLOBAL_STATS_ID,
+                    entries,
+                    exits,
+                    returns,
+                    unique,
+                    max(0, occupancy),
+                    max(0, peak),
+                    age_counts["crianca_count"],
+                    age_counts["junior_count"],
+                    age_counts["adolescente_count"],
+                    age_counts["jovem_count"],
+                    age_counts["adulto_count"],
+                    age_counts["idoso_count"],
+                    gender_counts["homem_count"],
+                    gender_counts["mulher_count"],
+                ),
+            )
+
+            conn.execute("DELETE FROM service_event_people")
+            person_rows = [
+                (
+                    pid,
+                    data["first_seen_at"],
+                    data["last_seen_at"],
+                    int(data["entries_count"]),
+                    int(data["exits_count"]),
+                    int(data["returns_count"]),
+                    data["age_band"],
+                    data["gender"],
+                    data["last_direction"],
+                    data["last_exit_at"],
+                )
+                for pid, data in people.items()
+            ]
+            if person_rows:
+                conn.executemany(
                     """
-                    INSERT INTO service_event_stats (
-                        culto_id, entries_count, exits_count, returns_count, unique_people_count,
-                        current_occupancy, peak_occupancy, crianca_count, junior_count,
-                        adolescente_count, jovem_count, adulto_count, idoso_count,
-                        homem_count, mulher_count, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(culto_id) DO UPDATE SET
-                        entries_count = excluded.entries_count,
-                        exits_count = excluded.exits_count,
-                        returns_count = excluded.returns_count,
-                        unique_people_count = excluded.unique_people_count,
-                        current_occupancy = excluded.current_occupancy,
-                        peak_occupancy = excluded.peak_occupancy,
-                        crianca_count = excluded.crianca_count,
-                        junior_count = excluded.junior_count,
-                        adolescente_count = excluded.adolescente_count,
-                        jovem_count = excluded.jovem_count,
-                        adulto_count = excluded.adulto_count,
-                        idoso_count = excluded.idoso_count,
-                        homem_count = excluded.homem_count,
-                        mulher_count = excluded.mulher_count,
-                        updated_at = CURRENT_TIMESTAMP
+                    INSERT INTO service_event_people (
+                        person_id, first_seen_at, last_seen_at,
+                        entries_count, exits_count, returns_count, age_band, gender,
+                        last_direction, last_exit_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        culto_id,
-                        entries,
-                        exits,
-                        returns,
-                        unique,
-                        max(0, occupancy),
-                        max(0, peak),
-                        age_counts["crianca_count"],
-                        age_counts["junior_count"],
-                        age_counts["adolescente_count"],
-                        age_counts["jovem_count"],
-                        age_counts["adulto_count"],
-                        age_counts["idoso_count"],
-                        gender_counts["homem_count"],
-                        gender_counts["mulher_count"],
-                    ),
+                    person_rows,
                 )
-
-                conn.execute(
-                    "DELETE FROM service_event_people WHERE culto_id = ?",
-                    (culto_id,),
-                )
-                person_rows = [
-                    (
-                        culto_id,
-                        pid,
-                        data["first_seen_at"],
-                        data["last_seen_at"],
-                        int(data["entries_count"]),
-                        int(data["exits_count"]),
-                        int(data["returns_count"]),
-                        data["age_band"],
-                        data["gender"],
-                        data["last_direction"],
-                        data["last_exit_at"],
-                    )
-                    for pid, data in people.items()
-                ]
-                if person_rows:
-                    conn.executemany(
-                        """
-                        INSERT INTO service_event_people (
-                            culto_id, person_id, first_seen_at, last_seen_at,
-                            entries_count, exits_count, returns_count, age_band, gender,
-                            last_direction, last_exit_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        person_rows,
-                    )
             conn.commit()
 
-        message = f"Conciliação concluída. Cultos: {touched_cultos}, eventos: {total_rows}."
+        message = f"Conciliação concluída. Eventos: {total_rows}."
         _set_reconciliation_state(
             run_id=run_id,
             status="done",
@@ -1305,31 +1311,36 @@ def resolve_active_service(event_ts: datetime) -> dict[str, Any] | None:
     return selected
 
 
-def livre_culto_id_for_date(d: date) -> str:
-    """Bucket diario para eventos fora da janela de qualquer culto agendado."""
-    return f"livre_{d.strftime('%Y%m%d')}"
-
-
-def resolve_culto_context_for_timestamp(event_ts: datetime) -> dict[str, Any]:
+def agenda_display_context(event_ts: datetime) -> dict[str, Any]:
     """
-    Resolve culto_id e rotulo para ingestao / painel.
-
-    Dentro da janela (inicio + antecedencia / duracao) usa o culto agendado.
-    Fora dela, agrupa no dia em `livre_YYYYMMDD` para manter contagem continua.
+    Rotulo derivado da agenda (horario aproximado) — apenas para UI / exportacao.
+    Nao persiste em eventos nem define particao de dados operacionais.
     """
     event_ts = event_ts.astimezone()
     service = resolve_active_service(event_ts)
     if service is not None:
         return {
-            "culto_id": service["culto_id"],
             "service_name": service["service_name"],
             "scheduled": True,
+            "report_culto_id": service["culto_id"],
         }
     return {
-        "culto_id": livre_culto_id_for_date(event_ts.date()),
         "service_name": "Fora da agenda",
         "scheduled": False,
+        "report_culto_id": None,
     }
+
+
+def derive_report_culto_id_for_event_ts(event_ts_raw: str) -> str:
+    """Chave sintetica AAAAMMDD_scheduleId para planilhas, a partir do horario do evento."""
+    try:
+        dt = datetime.fromisoformat(str(event_ts_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    svc = resolve_active_service(dt.astimezone())
+    return str(svc["culto_id"]) if svc else ""
 
 
 def _inc_age_band(stats_row: sqlite3.Row | None, age_band: AgeBand | None) -> dict[str, int]:
@@ -1392,8 +1403,7 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
     event_ts = payload.event_ts or datetime.now(UTC)
     event_ts = event_ts.astimezone()
     config = load_config()
-    ctx = resolve_culto_context_for_timestamp(event_ts)
-    culto_id = ctx["culto_id"]
+    display = agenda_display_context(event_ts)
     event_ts_s = event_ts.isoformat()
     event_id = str(uuid.uuid4())
     is_return = False
@@ -1412,9 +1422,9 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
             """
             SELECT *
             FROM service_event_people
-            WHERE culto_id = ? AND person_id = ?
+            WHERE person_id = ?
             """,
-            (culto_id, payload.person_id),
+            (payload.person_id,),
         ).fetchone()
 
         if person is None:
@@ -1432,12 +1442,11 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT INTO service_event_people (
-                    culto_id, person_id, first_seen_at, last_seen_at,
+                    person_id, first_seen_at, last_seen_at,
                     entries_count, exits_count, returns_count, age_band, gender, last_direction, last_exit_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    culto_id,
                     payload.person_id,
                     event_ts_s,
                     event_ts_s,
@@ -1489,7 +1498,7 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
                     gender = ?,
                     last_direction = ?,
                     last_exit_at = ?
-                WHERE culto_id = ? AND person_id = ?
+                WHERE person_id = ?
                 """,
                 (
                     event_ts_s,
@@ -1500,7 +1509,6 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
                     gender,
                     payload.direction,
                     last_exit_at,
-                    culto_id,
                     payload.person_id,
                 ),
             )
@@ -1509,11 +1517,10 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
         conn.execute(
             """
             INSERT INTO events (event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender)
-            VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
+            VALUES (?, NULL, NULL, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
-                culto_id,
                 payload.person_id,
                 payload.direction,
                 event_ts_s,
@@ -1524,7 +1531,7 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
 
         stats = conn.execute(
             "SELECT * FROM service_event_stats WHERE culto_id = ?",
-            (culto_id,),
+            (GLOBAL_STATS_ID,),
         ).fetchone()
         entries = int(stats["entries_count"]) if stats else 0
         exits = int(stats["exits_count"]) if stats else 0
@@ -1576,7 +1583,7 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
-                culto_id,
+                GLOBAL_STATS_ID,
                 entries,
                 exits,
                 returns,
@@ -1597,9 +1604,10 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
 
     return {
         "event_id": event_id,
-        "culto_id": culto_id,
-        "service_name": ctx["service_name"],
-        "scheduled": ctx["scheduled"],
+        "culto_id": None,
+        "report_culto_id": display["report_culto_id"],
+        "service_name": display["service_name"],
+        "scheduled": display["scheduled"],
         "direction": payload.direction,
         "is_return": is_return,
         "is_new_unique": is_new_unique,
@@ -1609,28 +1617,23 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
 
 
 def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
-    if culto_id is None:
-        now = datetime.now(UTC).astimezone()
-        ctx = resolve_culto_context_for_timestamp(now)
-        culto_id = ctx["culto_id"]
-        service_name = ctx["service_name"]
-        scheduled = ctx["scheduled"]
-    else:
-        service_name = None
-        scheduled = not str(culto_id).startswith("livre_")
+    _ = culto_id
+    now = datetime.now(UTC).astimezone()
+    display = agenda_display_context(now)
 
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM service_event_stats WHERE culto_id = ?",
-            (culto_id,),
+            (GLOBAL_STATS_ID,),
         ).fetchone()
 
     if row is None:
         return {
             "active": True,
-            "culto_id": culto_id,
-            "service_name": service_name,
-            "scheduled": scheduled,
+            "culto_id": None,
+            "report_culto_id": display["report_culto_id"],
+            "service_name": display["service_name"],
+            "scheduled": display["scheduled"],
             "entries_count": 0,
             "exits_count": 0,
             "returns_count": 0,
@@ -1653,9 +1656,10 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
 
     return {
         "active": True,
-        "culto_id": culto_id,
-        "service_name": service_name,
-        "scheduled": scheduled,
+        "culto_id": None,
+        "report_culto_id": display["report_culto_id"],
+        "service_name": display["service_name"],
+        "scheduled": display["scheduled"],
         "entries_count": int(row["entries_count"]),
         "exits_count": int(row["exits_count"]),
         "returns_count": int(row["returns_count"]),
@@ -1680,6 +1684,7 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
 def get_dashboard_charts(
     culto_id: str | None = None, window_minutes: int = 180, bucket_seconds: int = 300
 ) -> dict[str, Any]:
+    _ = culto_id
     safe_window = max(30, min(window_minutes, 24 * 60))
     # Padrao 5 min para leitura de chegadas no grafico; minimo 5 min.
     safe_bucket = max(300, min(bucket_seconds, 3600))
@@ -1709,23 +1714,22 @@ def get_dashboard_charts(
             "genders": {"homem": 0, "mulher": 0},
         }
 
-    resolved_culto_id = str(live["culto_id"])
     with get_connection() as conn:
         rows = conn.execute(
             """
             SELECT event_type, event_ts
             FROM events
-            WHERE culto_id = ?
-              AND event_ts >= datetime('now', ?)
+            WHERE event_ts >= datetime('now', ?)
             ORDER BY event_ts ASC, id ASC
             """,
-            (resolved_culto_id, f"-{safe_window} minutes"),
+            (f"-{safe_window} minutes",),
         ).fetchall()
 
     if not rows:
         return {
             "active": True,
-            "culto_id": resolved_culto_id,
+            "culto_id": None,
+            "report_culto_id": live.get("report_culto_id"),
             "service_name": live.get("service_name"),
             "scheduled": live.get("scheduled", True),
             "window_minutes": safe_window,
@@ -1755,7 +1759,8 @@ def get_dashboard_charts(
     if not events:
         return {
             "active": True,
-            "culto_id": resolved_culto_id,
+            "culto_id": None,
+            "report_culto_id": live.get("report_culto_id"),
             "service_name": live.get("service_name"),
             "scheduled": live.get("scheduled", True),
             "window_minutes": safe_window,
@@ -1827,7 +1832,8 @@ def get_dashboard_charts(
 
     return {
         "active": True,
-        "culto_id": resolved_culto_id,
+        "culto_id": None,
+        "report_culto_id": live.get("report_culto_id"),
         "service_name": live.get("service_name"),
         "scheduled": live.get("scheduled", True),
         "window_minutes": safe_window,
