@@ -2,11 +2,20 @@
   box-sizing: border-box;
 }
 
+/* Base legivel em telemovel: ~17px; evita herdar 12–13px em demasia */
+html {
+  font-size: clamp(16px, 0.2rem + 3.2vw, 18px);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
-  font-family: Arial, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   background: #f3f4f6;
   color: #1f2937;
+  font-size: 1rem;
+  line-height: 1.55;
 }
 
 .app-shell {
@@ -26,6 +35,7 @@ body {
 
 .sidebar h2 {
   margin: 0 0 4px;
+  font-size: 1.35rem;
 }
 
 .menu {
@@ -37,9 +47,12 @@ body {
 .menu a {
   color: #334155;
   text-decoration: none;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 1rem;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
 }
 
 .menu a:hover,
@@ -50,7 +63,7 @@ body {
 .main-content {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 18px 16px 24px;
+  padding: 1.1rem 1rem 1.5rem;
   width: 100%;
 }
 
@@ -63,25 +76,39 @@ body {
 
 h1 {
   margin: 0 0 4px;
+  font-size: clamp(1.35rem, 1.1rem + 1.5vw, 1.85rem);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: clamp(1.2rem, 1.05rem + 0.9vw, 1.45rem);
+  line-height: 1.3;
+}
+
+h3 {
+  font-size: 1.08rem;
+  line-height: 1.35;
 }
 
 .subtitle {
   margin: 0 0 6px;
   color: #4b5563;
+  font-size: 1.02rem;
 }
 
 .help {
-  color: #6b7280;
-  font-size: 13px;
+  color: #4b5563;
+  font-size: 0.98rem;
   margin-top: 0;
+  line-height: 1.55;
 }
 
 .card {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
-  padding: 14px;
-  margin-bottom: 14px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
 }
 
 .live-card {
@@ -91,12 +118,15 @@ h1 {
 
 .pill {
   display: inline-block;
-  padding: 5px 9px;
+  padding: 0.4rem 0.75rem;
   border-radius: 999px;
   background: #e5e7eb;
   color: #334155;
-  font-size: 12px;
+  font-size: 0.92rem;
   margin-bottom: 8px;
+  line-height: 1.4;
+  max-width: 100%;
+  word-break: break-word;
 }
 
 .live-card.live-offline {
@@ -159,11 +189,11 @@ h1 {
   flex: 1 1 220px;
   min-width: min(100%, 220px);
   max-width: 100%;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 7px;
   background: #fff;
-  font-size: 13px;
+  font-size: 1rem;
   color: #1e293b;
 }
 
@@ -185,30 +215,33 @@ h1 {
 
 .live-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .metric-box {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 8px;
+  padding: 10px 11px;
 }
 
 .metric-label {
   display: block;
-  font-size: 12px;
+  font-size: 0.9rem;
   color: #4b5563;
+  line-height: 1.35;
 }
 
 .metric-value {
   display: block;
-  margin-top: 4px;
-  font-size: 22px;
+  margin-top: 6px;
+  font-size: clamp(1.45rem, 1.1rem + 1.8vw, 1.85rem);
   font-weight: 700;
   color: #111827;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-grid {
@@ -228,7 +261,7 @@ h1 {
 
 .chart-card h3 {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 1.02rem;
   color: #334155;
 }
 
@@ -261,7 +294,7 @@ label {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 14px;
+  font-size: 1rem;
 }
 
 input[type="number"],
@@ -269,16 +302,19 @@ input[type="text"],
 input[type="time"],
 select,
 textarea {
-  padding: 7px;
+  padding: 10px 11px;
   border: 1px solid #d1d5db;
   border-radius: 7px;
   background: #fff;
+  font-size: 1rem;
+  line-height: 1.4;
 }
 
 textarea {
   width: 100%;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .checkbox {
@@ -300,10 +336,12 @@ textarea {
 button {
   border: none;
   border-radius: 7px;
-  padding: 9px 11px;
+  padding: 11px 14px;
   background: #2563eb;
   color: #fff;
   cursor: pointer;
+  font-size: 1rem;
+  line-height: 1.35;
 }
 
 button.secondary {
@@ -370,7 +408,7 @@ button.danger {
   .table-wrap--stack td[data-label]::before {
     content: attr(data-label);
     display: block;
-    font-size: 11px;
+    font-size: 0.82rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -379,7 +417,7 @@ button.danger {
   }
 
   .table-wrap--stack td[colspan] {
-    font-size: 13px;
+    font-size: 0.98rem;
     color: #6b7280;
   }
 
@@ -397,7 +435,9 @@ button.danger {
   background: #fffbeb;
   border: 1px solid #fde68a;
   border-radius: 8px;
-  padding: 8px;
+  padding: 10px 12px;
+  font-size: 0.98rem;
+  line-height: 1.5;
 }
 
 .progress-wrap {
@@ -446,7 +486,7 @@ details[open] summary {
 }
 
 .config-subheading {
-  font-size: 15px;
+  font-size: 1.08rem;
   font-weight: 600;
   margin: 18px 0 8px;
   color: #374151;
@@ -516,9 +556,9 @@ details[open] summary {
 
 .badge {
   display: inline-block;
-  padding: 4px 8px;
+  padding: 5px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.88rem;
   background: #e5e7eb;
   color: #334155;
 }
@@ -540,14 +580,15 @@ details[open] summary {
 
 code {
   background: #eef2ff;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 6px;
+  font-size: 0.92em;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 0.98rem;
 }
 
 th,
@@ -571,9 +612,19 @@ thead {
     max-height: none;
   }
 
+  .sidebar.card {
+    margin-bottom: 0.75rem;
+  }
+
   .menu {
     flex-direction: row;
     flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .menu a {
+    min-height: 44px;
+    padding: 10px 14px;
   }
 
   .chart-grid {
@@ -601,12 +652,13 @@ thead {
     gap: 8px;
   }
 
-  .cleanup-actions form {
-    flex: 1 1 100%;
+  .cleanup-actions {
+    flex-direction: column;
   }
 
   .cleanup-actions button {
     width: 100%;
+    min-height: 46px;
   }
 }
 
@@ -658,33 +710,23 @@ thead {
 
 @media (max-width: 640px) {
   .main-content {
-    padding: 10px 10px 14px;
+    padding: 0.75rem 0.85rem 1.25rem;
   }
 
   .card {
-    padding: 10px;
-    border-radius: 8px;
+    padding: 1rem;
+    border-radius: 10px;
   }
 
-  h1 {
-    font-size: 22px;
-  }
-
-  h2 {
-    font-size: 18px;
-  }
-
-  .metric-value {
-    font-size: 20px;
-  }
-
+  /* Nao reduzir titulos no telemovel — ja usam clamp no global */
   button {
-    min-height: 42px;
+    min-height: 46px;
   }
 
   th,
   td {
-    font-size: 12px;
+    font-size: 0.95rem;
+    padding: 10px 11px;
     white-space: normal;
     word-break: break-word;
   }
@@ -695,6 +737,21 @@ thead {
     bottom: 12px;
     max-width: none;
     align-items: stretch;
+  }
+
+  .vip-toast {
+    font-size: 1rem;
+    padding: 14px 16px;
+  }
+
+  .chart-canvas-wrap {
+    height: 200px;
+    max-height: 200px;
+  }
+
+  .chart-canvas-wrap--bar {
+    height: 190px;
+    max-height: 190px;
   }
 }
 
