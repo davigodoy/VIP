@@ -170,6 +170,8 @@ curl -sS -X POST "http://127.0.0.1:8000/api/events/ingest" \
 
 Se as métricas no painel subirem, a API e a base estão corretas; em produção falta garantir que o serviço de visão/track corre e aponta para a mesma URL.
 
+O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e os **gráficos** a cada **2,5 s** (polling sobre `GET /api/metrics/live` e `.../charts`). Cada `POST /api/events/ingest` fica visível no painel dentro desse intervalo, sem precisar recarregar a página.
+
 ### Eventos e metricas
 
 - `POST /api/events/ingest`

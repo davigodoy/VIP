@@ -36,7 +36,7 @@
 
       <section id="sec-dashboard" class="card live-card">
         <h2>Dashboard em tempo real</h2>
-        <p class="help">Atualizacao automatica a cada 5s.</p>
+        <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong> (alinhado a um edge que envia <code>POST /api/events/ingest</code>).</p>
         <p class="warn">A contagem <strong>só aumenta</strong> se um programa à parte (edge, junto da câmera) enviar eventos para <code>POST /api/events/ingest</code>. O preview de vídeo <strong>não</strong> deteta nem conta pessoas — sem esse envio, os números ficam em zero mesmo com a imagem OK.</p>
         <div id="live-status" class="pill">Carregando...</div>
         <div class="live-grid">
@@ -1047,8 +1047,10 @@
     refreshCharts();
     refreshUpdates();
     refreshReconciliation();
-    setInterval(refreshLive, 5000);
-    setInterval(refreshCharts, 5000);
+    const VIP_DASH_LIVE_MS = 800;
+    const VIP_DASH_CHARTS_MS = 2500;
+    setInterval(refreshLive, VIP_DASH_LIVE_MS);
+    setInterval(refreshCharts, VIP_DASH_CHARTS_MS);
     setInterval(refreshUpdates, 4000);
     setInterval(refreshReconciliation, 2000);
   </script>
