@@ -128,19 +128,13 @@ else
 fi
 
 echo "[4/5] Aplicando migracoes (init DB)..."
+# stdin sem cwd deixa de incluir o pacote app no path; e obrigatorio cd ao INSTALL_DIR.
 if [[ -x "$INSTALL_DIR/.venv/bin/python" ]]; then
-  sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/python" - <<PY
-from app.db import init_db
-init_db()
-print("DB OK")
-PY
+  _vip_py="$INSTALL_DIR/.venv/bin/python"
 else
-  sudo -u "$RUN_USER" "$PYTHON_BIN" - <<PY
-from app.db import init_db
-init_db()
-print("DB OK")
-PY
+  _vip_py="$PYTHON_BIN"
 fi
+sudo -u "$RUN_USER" bash -c 'cd "$1" && exec "$2" -c "from app.db import init_db; init_db(); print(\"DB OK\")"' bash "$INSTALL_DIR" "$_vip_py"
 
 if [[ "$SKIP_RESTART" -eq 0 ]]; then
   echo "[5/5] Reiniciando vip-dashboard.service..."
