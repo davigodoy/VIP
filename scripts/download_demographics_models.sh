@@ -5,7 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="$ROOT/data/opencv_dnn_models"
 mkdir -p "$DIR"
-BASE="https://github.com/spmallick/learnopencv/raw/master/AgeGender"
+# learnopencv deixou de versionar os .caffemodel no GitHub (404 em raw). Pesos alinhados com os prototxt usados no VIP:
+BASE="https://raw.githubusercontent.com/GilLevi/AgeGenderDeepLearning/master/models"
 MIN_BYTES=$((1024 * 1024))
 
 _file_ok() {

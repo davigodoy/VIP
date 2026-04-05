@@ -16,4 +16,4 @@ Requisitos: `curl`. Os ficheiros `age_deploy.prototxt` e `gender_deploy.prototxt
 
 Sem estes pesos, a deteccao HOG continua a funcionar; apenas **nao** ha estimativa de idade/sexo no `ingest` (o log regista uma vez que faltam modelos).
 
-Origem dos pesos: repositorio [learnopencv AgeGender](https://github.com/spmallick/learnopencv/tree/master/AgeGender) (OpenCV DNN + Caffe).
+Origem dos pesos: [GilLevi/AgeGenderDeepLearning](https://github.com/GilLevi/AgeGenderDeepLearning) (`models/*.caffemodel` via `raw.githubusercontent.com`). Os `.prototxt` no VIP seguem o tutorial learnopencv/OpenCV DNN; sao compativeis com estes pesos.
