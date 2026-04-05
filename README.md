@@ -6,16 +6,46 @@ Google Sheets.
 
 ## Visao geral
 
-O projeto registra eventos de entrada e saida, consolida metricas por culto e
-disponibiliza monitoramento em tempo real via interface web.
+O projeto **deteta fluxo (opcionalmente no proprio servidor via HOG OpenCV) e/ou
+via edge** e **grava cada evento na base SQLite** (`events`, estado por
+`(culto_id, person_id)` em `service_event_people`, agregados em `service_event_stats` por `culto_id`, incluindo `__global__`). Deteccao integrada e `POST /api/events/ingest` usam a **mesma
+funcao interna** de ingestao — mesma gravacao e mesmas metricas ao vivo.
+A tabela **`events`** e o arquivo minimo para **reconciliar a qualquer momento**
+(ou semanas depois), desde que a politica de retencao ainda os mantenha.
 
 Escopo funcional:
-- contagem de entradas e saidas por culto
+- contagem de entradas e saidas (agregado **global** e, na janela da agenda, particao **por culto** com a mesma chave sintetica `report_culto_id`)
 - ocupacao atual e pico de ocupacao
-- reentrada considerada apenas na janela do mesmo culto
-- distribuicoes opcionais por faixa etaria e genero (estimativas)
+- reentrada: mesma `person_id` **na mesma particao** (`__global__` ou culto da agenda), dentro da **janela em minutos** configurada
+- distribuicoes opcionais por faixa etaria e genero (quando o **edge** envia no `ingest`; o HOG integrado nao estima)
 - sincronizacao opcional com Google Sheets
-- reconciliacao manual para recomputar metricas a partir dos eventos brutos
+- reconciliacao manual (no Pi ou a posteriori noutro equipamento) para recomputar
+  metricas a partir dos **eventos brutos** guardados na tabela `events`
+- **Envolvimento** (novo / visitante / membro): dias de calendario distintos com
+  entrada numa janela movel (ex. 30 dias), com limiar configuravel para
+  **membro**; requer `person_id` estavel entre visitas (edge). Ver
+  `GET /api/people/involvement`
+
+## Conferencia com o rascunho de objetivos (igreja / Pi 4)
+
+Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
+
+| Objetivo no rascunho | Estado no VIP |
+|----------------------|---------------|
+| Pi 4 + camera USB (ex. C920), operacao continua | Sim: V4L2, preview, HOG opcional, `systemd` no deploy |
+| Entradas, saidas, ocupacao, pico | Sim: dashboard + `events` / `service_event_stats` |
+| Reentradas **no mesmo culto** | Sim na particao do culto: mesmo `person_id`, saida anterior dentro de **N minutos**, contagem isolada por `culto_id` da agenda |
+| **Pessoas unicas por culto** | Sim: estado ao vivo em particoes por chave de culto (agenda + horario do evento); na tabela `events` so ha `event_ts` — o culto nao e colado ao registo de deteccao |
+| Cultos por nome, dia, horario | Sim: `service_schedules` + configuracao no painel |
+| Dados **organizados por evento fixo** | Sim: particoes em `service_event_*` e filtros de grafico derivam culto a partir de `event_ts` + agenda; `events` guarda fluxo e horario |
+| Painel responsivo (celular / PC) | Sim |
+| Sync Google Sheets opcional | Sim |
+| Configuracao completa via web | Sim: camera, agenda, retencao, regras de envolvimento, Sheets, etc. |
+| Faixa etaria e genero (estimativas) | **Opcional via API** (`ingest`); sem modelo de idade/sexo no HOG do servidor |
+| Horarios / picos de entrada | Sim: graficos de fluxo e ocupacao (janela configuravel) |
+| Conciliacao pelo navegador (outro PC/Mac) | Sim: `GET .../events` + `POST .../apply` + botoes no painel |
+| Privacidade: sem nome, IDs tecnicos | Sim: `person_id` / track, sem cadastro nominal no fluxo padrao |
+| Categorizar frequencia (novo / visitante / membro) | Sim: **Regras envolvimento** + dashboard + lista; depende de `person_id` **estavel** (edge) |
 
 ## Funcionalidades principais
 
@@ -23,14 +53,22 @@ Escopo funcional:
   - nome, dia da semana, horario e status ativo/inativo
 - Configuracao de camera:
   - dispositivo (ex.: `/dev/video0`), nome, resolucao de inferencia e FPS
+  - deteccao HOG em segundo plano opcional (`live_detection_enabled`): gera
+    entradas/saidas gravadas como os demais eventos (sem preview obrigatorio)
 - Dashboard em tempo real:
   - entradas, saidas, retornos, unicos, ocupacao atual e pico
   - graficos de fluxo, ocupacao, faixa etaria e genero
 - Retencao e limpeza:
   - politicas configuraveis e execucao manual (dry-run/real)
   - limpeza automatica diaria
+  - **Envolvimento:** janela em dias e minimo de dias com entrada para membro
+    (painel: secao **Regras envolvimento** + resumo no dashboard + lista)
 - Conciliacao:
-  - execucao sob demanda no painel, com progresso e historico
+  - execucao sob demanda no painel (servidor ou browser), com progresso e historico
+  - **Fonte para conciliar mais tarde:** cada `ingest` grava ja em `events` o necessario
+    (`temp_id` / track, `event_type`, `event_ts`, `age_band`, `gender` quando existirem).
+    Os agregados do painel sao derivados; basta manter os eventos na BD (ajuste
+    **retencao de eventos** nos dias se precisar de reconciliar semanas depois).
 - Atualizacao do sistema:
   - via painel web (check + update em background)
   - via script bash para manutencao operacional
@@ -87,7 +125,7 @@ Opcoes adicionais:
 - `--skip-system-deps`
 - `--host 0.0.0.0`
 
-**Raspberry Pi 4:** o preview no painel e apenas fluxo de video (sem deteccao local no servidor), o que reduz CPU em relacao a classificadores OpenCV no proprio Pi. Em Linux o `pip` nao instala `pyobjc-framework-AVFoundation` (so macOS). Mantenha resolucao/FPS moderados na configuracao (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
+**Raspberry Pi 4:** o preview no painel e so video (JPEG). Opcionalmente, em **Configuracao da camera**, podes ligar **Deteccao automatica** (OpenCV HOG no mesmo thread de captura): corre em **segundo plano** sem abrir o preview, gera `entrada`/`saida` via a mesma logica que `ingest` — com o custo de CPU e imprecisao tipicos do HOG. Em Linux o `pip` nao instala `pyobjc-framework-AVFoundation` (so macOS). Mantenha resolucao/FPS moderados (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
 
 Acesso remoto:
 - `http://IP_DO_RASPBERRY:8000`
@@ -158,9 +196,9 @@ sudo systemctl status vip-dashboard.service
 
 ### Painel com metricas sempre a zero
 
-Este projeto é o **painel web + API**. Não inclui, no servidor do dashboard, deteção de pessoas no vídeo: o preview só mostra JPEG. Quem incrementa entradas/saídas é um **outro processo** (o teu “edge”) que chama `POST /api/events/ingest` com `person_id` e `direction`.
+As entradas/saidas vêm de **(A)** deteccao HOG opcional no servidor (`live_detection_enabled` no painel, requer OpenCV e camera ligada) e/ou **(B)** um **edge** externo que chama `POST /api/events/ingest` com `person_id` e `direction`. O preview so mostra imagem; nao e obrigatorio para (A).
 
-Teste rápido no Pi (ajusta host/porta ao teu serviço):
+Teste rápido da API no Pi (ajusta host/porta ao teu serviço):
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:8000/api/events/ingest" \
@@ -174,6 +212,9 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 
 ### Eventos e metricas
 
+- **Deteccao no servidor (HOG):** com camera e `live_detection_enabled` ativos,
+  o processo do painel escreve na base pelo mesmo caminho que abaixo; corre **a qualquer hora** (a agenda **nao** desliga a camera nem o HOG). Por defeito `live_detection_enabled` vem **desligado** na base — ative no painel e grave. Nao e obrigatorio abrir o preview no browser.
+
 - `POST /api/events/ingest`
   - campos:
     - `person_id` (string tecnica de track)
@@ -183,14 +224,19 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
     - `age_estimate` (opcional, inteiro)
     - `gender` (opcional: `homem|mulher`)
   - regras:
-    - eventos gravam só fluxo e `event_ts`; `culto_id` no banco fica sempre `NULL` (horario cadastrado nao particiona dados operacionais)
-    - reentrada usa `janela_reentrada_min` no estado global por `person_id`
+    - `events` guarda deteccao e **horario** (`event_ts`); `culto_id` na linha do evento fica `NULL` — o culto e so contexto da agenda, derivado quando necessario
+    - ingest atualiza **sempre** `__global__` e, se o instante cair na janela de um culto, tambem a particao desse culto (stats + pessoa por `(culto_id, person_id)`)
+    - reentrada usa `janela_reentrada_min` **por particao** (estado separado por culto e global)
     - classificacao por `age_estimate` usa limites configurados no painel
-    - resposta inclui `culto_id: null`, `report_culto_id` (chave sintetica se o instante cair na janela da agenda), `scheduled` e `service_name` (rotulos para UI / relatorios)
+    - resposta inclui `culto_id: null` no evento, mais `report_culto_id`, `scheduled` e `service_name` para UI / relatorios
 
-- `GET /api/metrics/live` — agregados do registro `__global__` em `service_event_stats`; `scheduled` / `report_culto_id` vêm só da agenda (exibicao)
+- `GET /api/people/involvement` — `person_id` com entrada na janela; campos
+  `visit_days`, `envolvimento` (`novo` | `visitante` | `membro`), `last_entrada`;
+  query `limit`, `offset`. Regras e `nota_identidade` no JSON.
 
-- `GET /api/metrics/charts` — todos os eventos na janela de tempo; query opcional `window_minutes`, `bucket_seconds` (padrao 300 s, minimo 300 s); parametro `culto_id` ignorado (legado)
+- `GET /api/metrics/live` — agregados da particao escolhida: sem query `culto_id`, usa o culto **atual na agenda** se `scheduled`, senao `__global__`. Query `culto_id` forca uma particao. Inclui `involvement` (global). `culto_id` no JSON e `null` quando a particao e o agregado global.
+
+- `GET /api/metrics/charts` — eventos na janela de tempo; mesma regra de particao que `live` (para um culto, filtra linhas cuja derivacao agenda+`event_ts` coincide com a particao). Queries `window_minutes`, `bucket_seconds`, `culto_id` opcionais.
 
 **Atualizacao de banco:** na primeira subida apos esta versao, uma migracao pode esvaziar `service_event_stats` e `service_event_people` e ajustar o schema; rode `POST /api/reconciliation/run` uma vez para recomputar a partir de `events`.
 
@@ -203,7 +249,18 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 
 - `GET /api/reconciliation/status`
 - `GET /api/reconciliation/runs`
-- `POST /api/reconciliation/run`
+- `POST /api/reconciliation/run` — recomputo **no servidor** (thread em background)
+- `GET /api/reconciliation/events` — lista eventos (ordem cronologica) para recomputo **no browser**
+- `POST /api/reconciliation/apply` — corpo JSON com `stats` + `people` (resultado do recomputo no PC/Mac); o servidor **so grava** na particao `__global__` (nao apaga particoes por culto). Nao usar em paralelo com `.../run` no servidor.
+
+No painel: botoes **Rodar no servidor (Pi)** e **Rodar neste browser**.
+
+**Conciliar depois (ideal no Pi, quando couber):** nao e preciso guardar ficheiros
+extra. O registo permanente para recomputo e a tabela **`events`**. Podes
+adiar a conciliacao por limites de CPU; quando correres (no Pi ou via browser +
+`apply`), o algoritmo so le `events`. Garante **retencao de eventos** (dias no
+painel) suficiente para o periodo que queres voltar a reconciliar; a limpeza
+automatica apaga eventos antigos e remove essa possibilidade para essas datas.
 
 ### Atualizacao
 

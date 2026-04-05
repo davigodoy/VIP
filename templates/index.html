@@ -18,7 +18,9 @@
         <a href="#sec-config-camera">Camera</a>
         <a href="#sec-config-etaria">Faixas etarias</a>
         <a href="#sec-config-sync">Planilha online</a>
+        <a href="#sec-config-envolvimento">Regras envolvimento</a>
         <a href="#sec-config-retencao">Retencao</a>
+        <a href="#sec-envolvimento">Lista envolvimento</a>
         <a href="#sec-update">Atualizacoes</a>
         <a href="#sec-operacional">Operacional</a>
         <a href="#sec-conciliacao">Conciliacao</a>
@@ -36,8 +38,9 @@
 
       <section id="sec-dashboard" class="card live-card">
         <h2>Dashboard em tempo real</h2>
-        <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong> (alinhado a um edge que envia <code>POST /api/events/ingest</code>).</p>
-        <p class="warn">A contagem <strong>só aumenta</strong> se um programa à parte (edge, junto da câmera) enviar eventos para <code>POST /api/events/ingest</code>. O preview de vídeo <strong>não</strong> deteta nem conta pessoas — sem esse envio, os números ficam em zero mesmo com a imagem OK.</p>
+        <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong>. A <strong>agenda nao liga nem desliga</strong> a deteccao: com <strong>Deteccao automatica</strong> ativa na camera, o HOG corre <strong>a qualquer hora</strong> (culto e so rotulo / particao dos totais). Entradas tambem podem vir de um edge via <code>POST /api/events/ingest</code>.</p>
+        <p class="warn">A deteccao integrada (HOG) e aproximada: pode gerar <strong>falsos positivos</strong> e usa CPU no Pi. Para contagem confiavel em producao, prefira um modelo dedicado no edge enviando <code>ingest</code>. Por defeito a deteccao automatica vem <strong>desligada</strong> — marque o checkbox em Configuracao da camera e clique em gravar; sem isso e sem edge, os numeros permanecem em zero.</p>
+        <p id="live-detection-hint" class="warn" style="margin-top:6px;" hidden></p>
         <div id="live-status" class="pill">Carregando...</div>
         <div class="live-grid">
           <div class="metric-box"><span class="metric-label">Ocupacao atual</span><span id="m-current" class="metric-value">-</span></div>
@@ -48,14 +51,23 @@
           <div class="metric-box"><span class="metric-label">Unicos</span><span id="m-unique" class="metric-value">-</span></div>
         </div>
 
+        <h3 class="config-subheading" style="margin-top:14px;">Envolvimento (janela configuravel)</h3>
+        <p class="help" id="involvement-dash-hint">Contagem por <code>person_id</code> distintos com entrada nos ultimos <strong id="involvement-dash-janela">{{ config.envolvimento_janela_dias }}</strong> dias; membro = <strong id="involvement-dash-min">{{ config.envolvimento_visitas_min_membro }}</strong>+ dias com entrada. Ajuste em <a href="#sec-config-envolvimento">Regras envolvimento</a>.</p>
+        <div class="live-grid">
+          <div class="metric-box"><span class="metric-label">Novo (1 dia)</span><span id="m-env-novo" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Visitante</span><span id="m-env-visitante" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Membro</span><span id="m-env-membro" class="metric-value">-</span></div>
+          <div class="metric-box"><span class="metric-label">Total person_id</span><span id="m-env-total" class="metric-value">-</span></div>
+        </div>
+
         <div id="sec-monitor" class="preview-monitor" data-camera-fps="{{ config.camera_fps }}">
           <h3>Monitor da camera (preview de video)</h3>
           <p class="help">
             <strong>Raspberry Pi 4:</strong> alvo principal — camera USB ou modulo via V4L2 (normalmente <code>/dev/video0</code>).
             O usuario do servico deve estar no grupo <code>video</code>. Resolucao e FPS da configuracao pesam na CPU do Pi;
             valores moderados (ex.: 640x360, 8 FPS) sao recomendados.
-            O preview mostra <strong>só o fluxo de video</strong> (JPEG no navegador, LAN) para confirmar enquadramento e que o dispositivo responde — <strong>sem deteccao</strong> no servidor do painel, para poupar CPU no Pi.
-            Entradas, saidas, ocupacao e faixas etarias no painel vêm de <code>POST /api/events/ingest</code> (sempre aceito; horario do culto só rotula o periodo quando cai na janela configurada), processados pelo <strong>servico/backend</strong> que corre junto da camera (edge).
+            O preview mostra o <strong>fluxo de video</strong> (JPEG no navegador) para confirmar enquadramento. Com <strong>Deteccao automatica</strong> ligada na configuracao, o mesmo fluxo de captura corre em <strong>segundo plano</strong> (nao precisa iniciar o preview): o servidor aplica HOG e grava entradas/saidas como se fossem <code>ingest</code>.
+            Continua possivel usar um <strong>edge externo</strong> com <code>POST /api/events/ingest</code> em paralelo.
             <em>macOS (dev):</em> indices <code>0</code>/<code>1</code> ou permissao em Privacidade &gt; Camera para o app que corre o Python.
           </p>
           {% if not camera_preview.opencv_installed %}
@@ -105,12 +117,12 @@
           </div>
         </div>
 
-        <p class="help">Contagem continua (global). Rotulo da agenda: <strong id="live-service">-</strong>. Chave sintetica para relatorios (se couber na janela): <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
+        <p class="help">Totais no painel: no horario da agenda mostram o <strong>culto ativo</strong>; fora da janela, o agregado <strong>global</strong> (a deteccao HOG, se ligada, alimenta os dois conforme o horario de cada evento). Rotulo: <strong id="live-service">-</strong>. Chave: <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
       </section>
 
       <section id="sec-cultos" class="card">
         <h2>Cultos (nome, dia e horario)</h2>
-        <p class="help">Cadastre dia e horario de inicio aproximado; o painel usa isso só como <strong>rotulo</strong> (e para dicas em exportacoes). Contagem e eventos no banco sao globais, por timestamp.</p>
+        <p class="help">Cadastre dia e horario de inicio aproximado; o painel usa isso como <strong>rotulo</strong> e para <strong>particionar totais ao vivo</strong> quando estiver dentro da janela. Os eventos de deteccao gravam só <strong>horario</strong> (timestamp), nao um id de culto na linha do evento.</p>
         <div class="schedule-list">
           {% for schedule in schedules %}
           <form method="post" action="/schedules/{{ schedule.id }}/save" class="schedule-row">
@@ -191,6 +203,11 @@
             <label>Janela inicio do culto (min antes)<input type="number" name="culto_antecedencia_min" min="0" max="180" value="{{ config.culto_antecedencia_min }}" required /></label>
             <label>Duracao da janela do culto (min)<input type="number" name="culto_duracao_min" min="30" max="360" value="{{ config.culto_duracao_min }}" required /></label>
             <label>Nome da camera (exibido no painel)<input type="text" name="camera_label" value="{{ config.camera_label }}" required /></label>
+            <label class="checkbox full">
+              <input type="checkbox" name="live_detection_enabled" {% if config.live_detection_enabled %}checked{% endif %} />
+              Deteccao automatica de pessoas no servidor (HOG, 24/7 se a camera estiver ligada; nao depende da agenda nem do preview no browser)
+            </label>
+            <p class="help full">Alimenta o painel pela <strong>mesma logica que <code>POST /api/events/ingest</code></strong>: entradas, saidas, ocupacao, picos e contagem de &ldquo;unicos&rdquo; (aqui cada <code>hog_*</code> e um track visual). O rotulo de culto na UI segue a <strong>agenda e a hora atual</strong>. <strong>Faixa etaria e sexo</strong> no dashboard so aumentam se o evento trouxer esses campos (o HOG nao envia). <strong>Reentrada</strong> (janela em minutos) compara com o mesmo <code>person_id</code>; como o id HOG muda quando a pessoa some do quadro, reentradas reais costumam aparecer como nova entrada — para demografia e identidade estavel use um edge com modelo proprio.</p>
           </div>
         </section>
 
@@ -228,6 +245,19 @@
           </div>
         </section>
 
+        <section id="sec-config-envolvimento" class="card">
+          <h2>Regras de envolvimento (dashboard e lista)</h2>
+          <p class="help">
+            Estes numeros definem a <strong>janela movel</strong> (em dias) e o <strong>minimo de dias com entrada</strong> para classificar como <em>membro</em>.
+            O dashboard mostra quantos <code>person_id</code> distintos caem em cada faixa; a lista detalhada esta em <a href="#sec-envolvimento">Lista envolvimento</a>.
+            Requer <code>person_id</code> estavel (edge). Com HOG, os ids mudam entre visitas.
+          </p>
+          <div class="grid">
+            <label>Janela (dias)<input type="number" name="envolvimento_janela_dias" min="7" max="120" value="{{ config.envolvimento_janela_dias }}" required title="Periodo movel: conta dias de calendario com pelo menos uma entrada" /></label>
+            <label>Min. dias com entrada para membro<input type="number" name="envolvimento_visitas_min_membro" min="2" max="31" value="{{ config.envolvimento_visitas_min_membro }}" required title="Ex.: 3 — 1 dia = novo; 2 = visitante (se min. &gt; 2); 3+ = membro" /></label>
+          </div>
+        </section>
+
         <section id="sec-config-retencao" class="card">
           <h2>Retencao e limpeza</h2>
           <div class="grid">
@@ -246,6 +276,40 @@
           </div>
         </section>
       </form>
+
+      <section id="sec-envolvimento" class="card">
+        <h2>Lista de envolvimento (novo / visitante / membro)</h2>
+        <p class="help">
+          Com base nas <strong>entradas</strong> gravadas: conta <strong>dias de calendario distintos</strong> com pelo menos uma entrada na janela ({{ config.envolvimento_janela_dias }} dias — ajuste em <a href="#sec-config-envolvimento">Regras envolvimento</a>).
+          <strong>Novo</strong> = 1 dia na janela;
+          {% if config.envolvimento_visitas_min_membro > 2 %}
+          <strong>visitante</strong> = 2 a {{ config.envolvimento_visitas_min_membro - 1 }} dias;
+          {% else %}
+          <strong>visitante</strong> = (intermedio so se min. para membro for 3 ou mais);
+          {% endif %}
+          <strong>membro</strong> = {{ config.envolvimento_visitas_min_membro }} ou mais dias.
+        </p>
+        <p class="help warn" id="envolvimento-nota"></p>
+        <p class="help" id="envolvimento-resumo">Carregando resumo...</p>
+        <div class="reconcile-actions">
+          <button type="button" id="envolvimento-refresh" class="secondary">Atualizar lista</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>person_id</th>
+                <th>Dias com entrada</th>
+                <th>Envolvimento</th>
+                <th>Ultima entrada</th>
+              </tr>
+            </thead>
+            <tbody id="envolvimento-body">
+              <tr><td colspan="4">Carregando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section id="sec-update" class="card">
         <h2>Atualizacao do sistema</h2>
@@ -304,6 +368,7 @@
               <li><strong>Habilitada:</strong> {% if camera_status.camera_enabled %}Sim{% else %}Nao{% endif %}</li>
               <li><strong>Resolucao:</strong> {{ camera_status.inference_resolution }}</li>
               <li><strong>FPS:</strong> {{ camera_status.camera_fps }}</li>
+              <li><strong>Deteccao HOG (servidor):</strong> {% if camera_status.live_detection_enabled %}Sim{% else %}Nao{% endif %}</li>
             </ul>
           </div>
           <div>
@@ -338,13 +403,22 @@
       </section>
 
       <section id="sec-conciliacao" class="card">
-        <h2>Conciliacao (PC/Mac)</h2>
+        <h2>Conciliacao</h2>
+        <p class="help">
+          No servidor: recalcula <code>__global__</code> e cada culto (chave derivada de <code>event_ts</code> + agenda sobre <code>events</code>). No browser: so grava <code>__global__</code> ao aplicar.
+          Cada entrada/saida fica gravada em <code>events</code> no momento do fluxo — e isso que permite <strong>conciliar mais tarde</strong> (ideal no Pi quando couber em CPU; ou neste browser se o Pi estiver limitado).
+          Ajuste <strong>retencao de eventos</strong> na configuracao se precisar de recomputar periodos antigos; apos limpeza, esses eventos deixam de existir para conciliacao.
+        </p>
+        <p class="help">
+          Pode correr <strong>no servidor</strong> (Raspberry) ou <strong>neste browser</strong> (CPU do teu PC/Mac no loop; o servidor so grava o resultado).
+        </p>
         <p class="help warn">
-          Execute a conciliacao manualmente para recalcular estatisticas a partir dos eventos brutos.
-          <strong>Pode causar lentidao temporaria</strong> enquanto processa.
+          <strong>Servidor:</strong> pode deixar o Pi lento durante o processamento.
+          <strong>Browser:</strong> nao use enquanto a conciliacao no servidor estiver a correr.
         </p>
         <div class="reconcile-actions">
-          <button id="run-reconcile-now" type="button">Rodar conciliacao agora</button>
+          <button id="run-reconcile-now" type="button">Rodar no servidor (Pi)</button>
+          <button id="run-reconcile-browser" type="button" class="secondary">Rodar neste browser</button>
           <p id="reconcile-state" class="help">Status: carregando...</p>
         </div>
         <div class="progress-wrap" aria-label="Progresso da conciliacao">
@@ -583,6 +657,8 @@
         const data = await res.json();
         if (!data.active) {
           if (liveCard) liveCard.classList.add('live-offline');
+          const detHintOff = document.getElementById('live-detection-hint');
+          if (detHintOff) detHintOff.hidden = true;
           setText('live-status', 'Indisponivel');
           setText('live-service', '-');
           setText('live-culto-id', '-');
@@ -592,6 +668,10 @@
           setText('m-exits', 0);
           setText('m-returns', 0);
           setText('m-unique', 0);
+          setText('m-env-novo', 0);
+          setText('m-env-visitante', 0);
+          setText('m-env-membro', 0);
+          setText('m-env-total', 0);
           updateCharts({
             charts: { flow_per_minute: [], occupancy_series: [] },
             age_bands: {},
@@ -600,10 +680,32 @@
           return;
         }
         if (liveCard) liveCard.classList.remove('live-offline');
+        const scope = data.stats_scope === 'culto' ? 'totais do culto na agenda' : 'totais globais';
         setText(
           'live-status',
-          data.scheduled === false ? 'Online (fora da janela do culto)' : 'Online'
+          data.scheduled === false
+            ? `Online — ${scope} (fora da janela na agenda; deteccao HOG nao depende disso)`
+            : `Online — ${scope}`
         );
+        const detHint = document.getElementById('live-detection-hint');
+        if (detHint && data.camera_detection) {
+          const cd = data.camera_detection;
+          if (!cd.opencv_installed) {
+            detHint.hidden = false;
+            detHint.textContent =
+              'OpenCV nao instalado no servidor — deteccao HOG indisponivel. Instale opencv-python-headless no venv e reinicie.';
+          } else if (!cd.camera_enabled) {
+            detHint.hidden = false;
+            detHint.textContent =
+              'Camera desabilitada na configuracao — nada e capturado. Habilite a camera e grave.';
+          } else if (!cd.live_detection_enabled) {
+            detHint.hidden = false;
+            detHint.textContent =
+              'Deteccao automatica (HOG) esta DESLIGADA — por isso os numeros nao sobem ao passar na camera. Ative o checkbox nesta pagina (Configuracao da camera) e grave; nao e preciso abrir o preview.';
+          } else {
+            detHint.hidden = true;
+          }
+        }
         setText('live-service', data.service_name || '-');
         setText('live-culto-id', data.report_culto_id || '-');
         setText('m-current', data.current_occupancy ?? 0);
@@ -612,6 +714,25 @@
         setText('m-exits', data.exits_count ?? 0);
         setText('m-returns', data.returns_count ?? 0);
         setText('m-unique', data.unique_people_count ?? 0);
+        const inv = data.involvement;
+        if (inv && inv.summary) {
+          const sm = inv.summary;
+          setText('m-env-novo', sm.novo ?? 0);
+          setText('m-env-visitante', sm.visitante ?? 0);
+          setText('m-env-membro', sm.membro ?? 0);
+          setText('m-env-total', inv.total_person_ids ?? 0);
+          const jEl = document.getElementById('involvement-dash-janela');
+          const mEl = document.getElementById('involvement-dash-min');
+          if (jEl && inv.janela_dias != null) jEl.textContent = String(inv.janela_dias);
+          if (mEl && inv.visitas_min_para_membro != null) {
+            mEl.textContent = String(inv.visitas_min_para_membro);
+          }
+        } else {
+          setText('m-env-novo', '-');
+          setText('m-env-visitante', '-');
+          setText('m-env-membro', '-');
+          setText('m-env-total', '-');
+        }
       } catch (err) {
         setText('live-status', 'Falha ao atualizar');
       }
@@ -912,8 +1033,196 @@
         renderReconcileRuns(data.recent_runs || []);
         const btn = document.getElementById('run-reconcile-now');
         if (btn) btn.disabled = !!data.running;
+        const bBrowser = document.getElementById('run-reconcile-browser');
+        if (bBrowser) bBrowser.disabled = !!data.running;
       } catch (err) {
         setText('reconcile-state', 'Status: falha ao consultar');
+      }
+    }
+
+    /**
+     * Recomputo alinhado a retention.recompute_reconciliation_metrics (manter em sincronia).
+     */
+    function recomputeReconciliationInBrowser(eventRows, janelaReentradaMin) {
+      const entrySeen = new Set();
+      const people = new Map();
+      let entries = 0;
+      let exits = 0;
+      let returns = 0;
+      let unique = 0;
+      let occupancy = 0;
+      let peak = 0;
+      const age_counts = {
+        crianca_count: 0,
+        junior_count: 0,
+        adolescente_count: 0,
+        jovem_count: 0,
+        adulto_count: 0,
+        idoso_count: 0,
+      };
+      const gender_counts = { homem_count: 0, mulher_count: 0 };
+      const ageOk = new Set(['crianca', 'junior', 'adolescente', 'jovem', 'adulto', 'idoso']);
+
+      for (const row of eventRows) {
+        const person_id = String(row.temp_id || '').trim();
+        if (!person_id) continue;
+        const direction = row.event_type;
+        const event_ts_s = row.event_ts;
+        let eventDt = null;
+        try {
+          const d = new Date(event_ts_s);
+          if (!Number.isNaN(d.getTime())) eventDt = d;
+        } catch (e) { /* ignore */ }
+
+        let person = people.get(person_id);
+        if (!person) {
+          person = {
+            first_seen_at: event_ts_s,
+            last_seen_at: event_ts_s,
+            entries_count: 0,
+            exits_count: 0,
+            returns_count: 0,
+            age_band: row.age_band || null,
+            gender: row.gender || null,
+            last_direction: direction,
+            last_exit_at: direction === 'saida' ? event_ts_s : null,
+          };
+          people.set(person_id, person);
+        }
+        person.last_seen_at = event_ts_s;
+        if (!person.age_band && row.age_band) person.age_band = row.age_band;
+        if (!person.gender && row.gender) person.gender = row.gender;
+
+        if (direction === 'entrada') {
+          entries += 1;
+          occupancy += 1;
+          if (!entrySeen.has(person_id)) {
+            entrySeen.add(person_id);
+            unique += 1;
+            const ab = person.age_band;
+            if (ab && ageOk.has(ab)) age_counts[`${ab}_count`] += 1;
+            if (person.gender === 'homem' || person.gender === 'mulher') {
+              gender_counts[`${person.gender}_count`] += 1;
+            }
+          }
+          if (person.last_direction === 'saida' && person.last_exit_at && eventDt) {
+            try {
+              const prev = new Date(person.last_exit_at);
+              if (!Number.isNaN(prev.getTime())) {
+                const deltaMin = (eventDt - prev) / 60000;
+                if (deltaMin >= 0 && deltaMin <= janelaReentradaMin) {
+                  returns += 1;
+                  person.returns_count += 1;
+                }
+              }
+            } catch (e) { /* ignore */ }
+          }
+          person.entries_count += 1;
+          person.last_direction = 'entrada';
+          peak = Math.max(peak, occupancy);
+        } else if (direction === 'saida') {
+          exits += 1;
+          occupancy = Math.max(0, occupancy - 1);
+          person.exits_count += 1;
+          person.last_direction = 'saida';
+          person.last_exit_at = event_ts_s;
+        }
+      }
+
+      const stats = {
+        entries_count: entries,
+        exits_count: exits,
+        returns_count: returns,
+        unique_people_count: unique,
+        current_occupancy: Math.max(0, occupancy),
+        peak_occupancy: Math.max(0, peak),
+        crianca_count: age_counts.crianca_count,
+        junior_count: age_counts.junior_count,
+        adolescente_count: age_counts.adolescente_count,
+        jovem_count: age_counts.jovem_count,
+        adulto_count: age_counts.adulto_count,
+        idoso_count: age_counts.idoso_count,
+        homem_count: gender_counts.homem_count,
+        mulher_count: gender_counts.mulher_count,
+      };
+
+      const peopleList = [];
+      for (const [pid, d] of people) {
+        peopleList.push({
+          person_id: pid,
+          first_seen_at: d.first_seen_at,
+          last_seen_at: d.last_seen_at,
+          entries_count: d.entries_count,
+          exits_count: d.exits_count,
+          returns_count: d.returns_count,
+          age_band: d.age_band,
+          gender: d.gender,
+          last_direction: d.last_direction,
+          last_exit_at: d.last_exit_at,
+        });
+      }
+      return { stats, people: peopleList };
+    }
+
+    async function runReconciliationInBrowser() {
+      const btn = document.getElementById('run-reconcile-browser');
+      const serverBtn = document.getElementById('run-reconcile-now');
+      if (btn) btn.disabled = true;
+      if (serverBtn) serverBtn.disabled = true;
+      setText('reconcile-message', 'A descarregar eventos...');
+      setReconcileProgress(5);
+      try {
+        const st = await fetch(vipUrl('api/reconciliation/status'), { cache: 'no-store' });
+        const stData = await st.json();
+        if (stData.running) {
+          setText('reconcile-message', 'Servidor a conciliar; aguarde ou use so o browser quando terminar.');
+          return;
+        }
+
+        const cfgRes = await fetch(vipUrl('api/config'), { cache: 'no-store' });
+        if (!cfgRes.ok) throw new Error('Falha ao ler configuracao');
+        const cfg = await cfgRes.json();
+        const janela = Number(cfg.janela_reentrada_min) || 15;
+
+        const evRes = await fetch(vipUrl('api/reconciliation/events'), { cache: 'no-store' });
+        if (!evRes.ok) throw new Error('Falha ao obter eventos');
+        const evData = await evRes.json();
+        const events = evData.events || [];
+        setText('reconcile-message', `A processar ${events.length} eventos neste equipamento...`);
+        setReconcileProgress(15);
+
+        await new Promise((r) => setTimeout(r, 0));
+        const { stats, people } = recomputeReconciliationInBrowser(events, janela);
+        setReconcileProgress(85);
+
+        setText('reconcile-message', 'A gravar no servidor...');
+        const applyRes = await fetch(vipUrl('api/reconciliation/apply'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stats, people }),
+        });
+        let applyData = {};
+        try {
+          applyData = await applyRes.json();
+        } catch (e) {
+          applyData = {};
+        }
+        if (!applyRes.ok) {
+          const d = applyData.detail;
+          const msg = typeof d === 'string' ? d : (applyData.message || `HTTP ${applyRes.status}`);
+          setText('reconcile-message', msg);
+          setReconcileProgress(0);
+          return;
+        }
+        setText('reconcile-message', applyData.message || 'Conciliacao aplicada a partir do browser.');
+        setReconcileProgress(100);
+      } catch (err) {
+        setText('reconcile-message', err && err.message ? err.message : 'Falha na conciliacao no browser');
+        setReconcileProgress(0);
+      } finally {
+        if (btn) btn.disabled = false;
+        if (serverBtn) serverBtn.disabled = false;
+        await refreshReconciliation();
       }
     }
 
@@ -930,6 +1239,11 @@
           setText('reconcile-message', 'Falha ao iniciar conciliacao');
         }
       });
+    }
+
+    const reconcileBrowserBtn = document.getElementById('run-reconcile-browser');
+    if (reconcileBrowserBtn) {
+      reconcileBrowserBtn.addEventListener('click', () => { runReconciliationInBrowser(); });
     }
 
     function bindCameraDevices() {
@@ -1041,18 +1355,66 @@
       }
     }
 
+    function escHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    async function refreshEnvolvimento() {
+      const body = document.getElementById('envolvimento-body');
+      const resumo = document.getElementById('envolvimento-resumo');
+      const nota = document.getElementById('envolvimento-nota');
+      if (!body) return;
+      try {
+        const res = await fetch(vipUrl('api/people/involvement?limit=300&offset=0'), { cache: 'no-store' });
+        const d = await res.json();
+        if (!res.ok) {
+          body.innerHTML = `<tr><td colspan="4">Erro ao carregar (HTTP ${res.status})</td></tr>`;
+          if (resumo) resumo.textContent = '';
+          return;
+        }
+        if (nota) nota.textContent = d.nota_identidade || '';
+        const s = d.summary || {};
+        if (resumo) {
+          resumo.textContent = `Janela ${d.janela_dias} dias | Totais na janela: novo ${s.novo ?? 0}, visitante ${s.visitante ?? 0}, membro ${s.membro ?? 0} (${d.total ?? 0} person_id distintos). Lista: ${(d.people || []).length} linhas.`;
+        }
+        const rows = d.people || [];
+        if (rows.length === 0) {
+          body.innerHTML = '<tr><td colspan="4">Nenhuma entrada na janela.</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map((p) => `
+          <tr>
+            <td><code>${escHtml(p.person_id || '')}</code></td>
+            <td>${p.visit_days ?? '-'}</td>
+            <td>${escHtml(p.envolvimento ?? '')}</td>
+            <td>${escHtml(p.last_entrada ?? '')}</td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        body.innerHTML = '<tr><td colspan="4">Falha de rede ao carregar envolvimento</td></tr>';
+      }
+    }
+
+    document.getElementById('envolvimento-refresh')?.addEventListener('click', refreshEnvolvimento);
+
     bindCameraDevices();
     ensureCharts();
     refreshLive();
     refreshCharts();
     refreshUpdates();
     refreshReconciliation();
+    refreshEnvolvimento();
     const VIP_DASH_LIVE_MS = 800;
     const VIP_DASH_CHARTS_MS = 2500;
     setInterval(refreshLive, VIP_DASH_LIVE_MS);
     setInterval(refreshCharts, VIP_DASH_CHARTS_MS);
     setInterval(refreshUpdates, 4000);
     setInterval(refreshReconciliation, 2000);
+    setInterval(refreshEnvolvimento, 60000);
   </script>
 </body>
 </html>

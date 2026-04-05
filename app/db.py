@@ -25,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "camera_inference_width": 640,
     "camera_inference_height": 360,
     "camera_fps": 8,
+    "live_detection_enabled": 0,
     "culto_antecedencia_min": 30,
     "culto_duracao_min": 150,
     "estimar_faixa_etaria": 1,
@@ -42,6 +43,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "idade_limite_adolescente": 17,
     "idade_limite_jovem": 24,
     "idade_limite_adulto": 59,
+    "envolvimento_janela_dias": 30,
+    "envolvimento_visitas_min_membro": 3,
 }
 
 
@@ -123,7 +126,8 @@ def init_db() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS service_event_people (
-                person_id TEXT NOT NULL PRIMARY KEY,
+                culto_id TEXT NOT NULL DEFAULT '__global__',
+                person_id TEXT NOT NULL,
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 entries_count INTEGER NOT NULL DEFAULT 0,
@@ -132,7 +136,8 @@ def init_db() -> None:
                 age_band TEXT,
                 gender TEXT,
                 last_direction TEXT NOT NULL DEFAULT 'entrada',
-                last_exit_at TEXT
+                last_exit_at TEXT,
+                PRIMARY KEY (culto_id, person_id)
             );
 
             CREATE TABLE IF NOT EXISTS service_event_stats (
@@ -256,6 +261,44 @@ def init_db() -> None:
         conn.commit()
 
 
+def _migrate_service_event_people_culto_pk(conn: sqlite3.Connection) -> None:
+    """PK (culto_id, person_id) para metricas por culto; dados antigos -> __global__."""
+    people_cols = {
+        row["name"] for row in conn.execute("PRAGMA table_info(service_event_people)").fetchall()
+    }
+    if "culto_id" in people_cols:
+        return
+    conn.executescript(
+        """
+        CREATE TABLE service_event_people__v2 (
+            culto_id TEXT NOT NULL,
+            person_id TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            entries_count INTEGER NOT NULL DEFAULT 0,
+            exits_count INTEGER NOT NULL DEFAULT 0,
+            returns_count INTEGER NOT NULL DEFAULT 0,
+            age_band TEXT,
+            gender TEXT,
+            last_direction TEXT NOT NULL DEFAULT 'entrada',
+            last_exit_at TEXT,
+            PRIMARY KEY (culto_id, person_id)
+        );
+        INSERT INTO service_event_people__v2 (
+            culto_id, person_id, first_seen_at, last_seen_at,
+            entries_count, exits_count, returns_count, age_band, gender,
+            last_direction, last_exit_at
+        )
+        SELECT '__global__', person_id, first_seen_at, last_seen_at,
+            entries_count, exits_count, returns_count, age_band, gender,
+            last_direction, last_exit_at
+        FROM service_event_people;
+        DROP TABLE service_event_people;
+        ALTER TABLE service_event_people__v2 RENAME TO service_event_people;
+        """
+    )
+
+
 def _migrate_global_operational_schema(conn: sqlite3.Connection) -> None:
     """
     Eventos deixam de persistir culto_id; estado ao vivo e por pessoa sao globais.
@@ -345,6 +388,8 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE service_event_people ADD COLUMN last_exit_at TEXT")
     if "gender" not in people_cols:
         conn.execute("ALTER TABLE service_event_people ADD COLUMN gender TEXT")
+
+    _migrate_service_event_people_culto_pk(conn)
 
     stats_cols = {
         row["name"]
@@ -529,4 +574,3 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE update_state ADD COLUMN current_step TEXT NOT NULL DEFAULT ''"
         )
-

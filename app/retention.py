@@ -4,11 +4,14 @@ import json
 import os
 import subprocess
 import sys
+import time as time_std
 import uuid
 import sqlite3
 import threading
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
+from collections import defaultdict
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .camera_devices import list_detected_cameras
@@ -17,6 +20,7 @@ from .models import (
     AgeBand,
     EventIngestRequest,
     GenderBand,
+    ReconciliationApplyRequest,
     RetentionConfig,
     ServiceScheduleCreate,
     ServiceScheduleOut,
@@ -25,6 +29,25 @@ from .models import (
 
 # Agregados ao vivo e fila de pessoas: um unico registro (culto na agenda e so para exibicao/consulta).
 GLOBAL_STATS_ID = "__global__"
+
+_INVOLVEMENT_WHERE_ENTRADA = """
+    event_type = 'entrada'
+    AND temp_id IS NOT NULL
+    AND TRIM(COALESCE(temp_id, '')) != ''
+    AND LENGTH(COALESCE(event_ts, '')) >= 10
+    AND substr(event_ts, 1, 10) >= date('now', ?)
+"""
+
+_involvement_summary_cache: dict[str, Any] | None = None
+_involvement_summary_cache_time: float = 0.0
+_INVOLVEMENT_SUMMARY_TTL_SEC = 45.0
+_involvement_summary_lock = threading.Lock()
+
+
+def invalidate_involvement_summary_cache() -> None:
+    global _involvement_summary_cache
+    with _involvement_summary_lock:
+        _involvement_summary_cache = None
 
 
 def _to_bool(value: str) -> bool:
@@ -51,6 +74,7 @@ def load_config() -> RetentionConfig:
         camera_inference_width=640,
         camera_inference_height=360,
         camera_fps=8,
+        live_detection_enabled=False,
         culto_antecedencia_min=30,
         culto_duracao_min=150,
         estimar_faixa_etaria=True,
@@ -68,6 +92,8 @@ def load_config() -> RetentionConfig:
         idade_limite_adolescente=17,
         idade_limite_jovem=24,
         idade_limite_adulto=59,
+        envolvimento_janela_dias=30,
+        envolvimento_visitas_min_membro=3,
     )
 
     def _raw_or_default(key: str) -> str:
@@ -102,6 +128,7 @@ def load_config() -> RetentionConfig:
         camera_inference_width=int(_raw_or_default("camera_inference_width")),
         camera_inference_height=int(_raw_or_default("camera_inference_height")),
         camera_fps=int(_raw_or_default("camera_fps")),
+        live_detection_enabled=_to_bool(_raw_or_default("live_detection_enabled")),
         culto_antecedencia_min=int(_raw_or_default("culto_antecedencia_min")),
         culto_duracao_min=int(_raw_or_default("culto_duracao_min")),
         estimar_faixa_etaria=_to_bool(_raw_or_default("estimar_faixa_etaria")),
@@ -121,6 +148,10 @@ def load_config() -> RetentionConfig:
         idade_limite_adolescente=int(_raw_or_default("idade_limite_adolescente")),
         idade_limite_jovem=int(_raw_or_default("idade_limite_jovem")),
         idade_limite_adulto=int(_raw_or_default("idade_limite_adulto")),
+        envolvimento_janela_dias=int(_raw_or_default("envolvimento_janela_dias")),
+        envolvimento_visitas_min_membro=int(
+            _raw_or_default("envolvimento_visitas_min_membro")
+        ),
     )
 
 
@@ -139,6 +170,7 @@ def save_config(payload: RetentionConfig) -> None:
                 (key, str(int(value) if isinstance(value, bool) else value)),
             )
         conn.commit()
+    invalidate_involvement_summary_cache()
 
 
 def apply_camera_device(device: str) -> RetentionConfig:
@@ -190,6 +222,7 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
             )
             conn.execute(f"DELETE FROM snapshots WHERE captured_at < {policies['snapshots']}")
             conn.commit()
+            invalidate_involvement_summary_cache()
 
         result = {
             "run_ts": now.isoformat(),
@@ -392,6 +425,318 @@ def _close_reconciliation_run(
         conn.commit()
 
 
+def _reconciliation_row_val(row: Any, key: str) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key)
+    return row[key]
+
+
+def list_events_for_reconciliation_export() -> list[dict[str, Any]]:
+    """Lista eventos para o browser recomputar (mesma ordem que o job no servidor)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT temp_id, event_type, event_ts, age_band, gender
+            FROM events
+            ORDER BY event_ts ASC, id ASC
+            """
+        ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "temp_id": (r["temp_id"] or "") if r["temp_id"] is not None else "",
+                "event_type": r["event_type"],
+                "event_ts": r["event_ts"],
+                "age_band": r["age_band"],
+                "gender": r["gender"],
+            }
+        )
+    return out
+
+
+def recompute_reconciliation_metrics(
+    event_rows: list[Any],
+    janela_reentrada_min: int,
+    *,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[dict[str, int], dict[str, dict[str, Any]]]:
+    """
+    Recomputo puro (espelha a logica do antigo run_reconciliation_job).
+    Retorna (stats para gravacao, people por person_id).
+
+    Espelho no cliente: templates/index.html — funcao recomputeReconciliationInBrowser
+    (manter algoritmo alinhado ao alterar esta funcao).
+    """
+    entry_seen: set[str] = set()
+    people: dict[str, dict[str, Any]] = {}
+    entries = 0
+    exits = 0
+    returns = 0
+    unique = 0
+    occupancy = 0
+    peak = 0
+    age_counts = {
+        "crianca_count": 0,
+        "junior_count": 0,
+        "adolescente_count": 0,
+        "jovem_count": 0,
+        "adulto_count": 0,
+        "idoso_count": 0,
+    }
+    gender_counts = {"homem_count": 0, "mulher_count": 0}
+    processed = 0
+    total_rows = len(event_rows)
+
+    for row in event_rows:
+        processed += 1
+        person_id = str(_reconciliation_row_val(row, "temp_id") or "").strip()
+        if not person_id:
+            continue
+        direction = _reconciliation_row_val(row, "event_type")
+        event_ts_s = _reconciliation_row_val(row, "event_ts")
+        try:
+            event_dt = datetime.fromisoformat(str(event_ts_s))
+        except (ValueError, TypeError):
+            event_dt = None
+        person = people.get(person_id)
+        if person is None:
+            ab = _reconciliation_row_val(row, "age_band")
+            g = _reconciliation_row_val(row, "gender")
+            person = {
+                "first_seen_at": event_ts_s,
+                "last_seen_at": event_ts_s,
+                "entries_count": 0,
+                "exits_count": 0,
+                "returns_count": 0,
+                "age_band": ab or None,
+                "gender": g or None,
+                "last_direction": direction,
+                "last_exit_at": event_ts_s if direction == "saida" else None,
+            }
+            people[person_id] = person
+
+        person["last_seen_at"] = event_ts_s
+        row_ab = _reconciliation_row_val(row, "age_band")
+        row_g = _reconciliation_row_val(row, "gender")
+        if not person["age_band"] and row_ab:
+            person["age_band"] = row_ab
+        if not person["gender"] and row_g:
+            person["gender"] = row_g
+
+        if direction == "entrada":
+            entries += 1
+            occupancy += 1
+            if person_id not in entry_seen:
+                unique += 1
+                entry_seen.add(person_id)
+                if person["age_band"] in {
+                    "crianca",
+                    "junior",
+                    "adolescente",
+                    "jovem",
+                    "adulto",
+                    "idoso",
+                }:
+                    age_counts[f"{person['age_band']}_count"] += 1
+                if person["gender"] in {"homem", "mulher"}:
+                    gender_counts[f"{person['gender']}_count"] += 1
+
+            if (
+                person["last_direction"] == "saida"
+                and person["last_exit_at"]
+                and event_dt is not None
+            ):
+                try:
+                    delta = event_dt - datetime.fromisoformat(
+                        str(person["last_exit_at"])
+                    )
+                    if timedelta(minutes=0) <= delta <= timedelta(
+                        minutes=janela_reentrada_min
+                    ):
+                        returns += 1
+                        person["returns_count"] += 1
+                except ValueError:
+                    pass
+            person["entries_count"] += 1
+            person["last_direction"] = "entrada"
+            peak = max(peak, occupancy)
+        elif direction == "saida":
+            exits += 1
+            occupancy = max(0, occupancy - 1)
+            person["exits_count"] += 1
+            person["last_direction"] = "saida"
+            person["last_exit_at"] = event_ts_s
+
+        if on_progress is not None and total_rows > 0 and processed % 100 == 0:
+            on_progress(processed, total_rows)
+
+    stats: dict[str, int] = {
+        "entries_count": entries,
+        "exits_count": exits,
+        "returns_count": returns,
+        "unique_people_count": unique,
+        "current_occupancy": max(0, occupancy),
+        "peak_occupancy": max(0, peak),
+        **age_counts,
+        **gender_counts,
+    }
+    return stats, people
+
+
+def _upsert_partition_reconciliation_conn(
+    conn: sqlite3.Connection,
+    culto_id: str,
+    stats: dict[str, int],
+    people: dict[str, dict[str, Any]],
+) -> bool:
+    """Grava uma particao (stats + pessoas). Retorna True se os totais de stats mudaram."""
+    current_row = conn.execute(
+        "SELECT * FROM service_event_stats WHERE culto_id = ?",
+        (culto_id,),
+    ).fetchone()
+    next_row = {k: int(stats[k]) for k in stats}
+    changed = current_row is None or any(
+        int(current_row[key]) != int(value) for key, value in next_row.items()
+    )
+
+    conn.execute(
+        """
+            INSERT INTO service_event_stats (
+                culto_id, entries_count, exits_count, returns_count, unique_people_count,
+                current_occupancy, peak_occupancy, crianca_count, junior_count,
+                adolescente_count, jovem_count, adulto_count, idoso_count,
+                homem_count, mulher_count, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(culto_id) DO UPDATE SET
+                entries_count = excluded.entries_count,
+                exits_count = excluded.exits_count,
+                returns_count = excluded.returns_count,
+                unique_people_count = excluded.unique_people_count,
+                current_occupancy = excluded.current_occupancy,
+                peak_occupancy = excluded.peak_occupancy,
+                crianca_count = excluded.crianca_count,
+                junior_count = excluded.junior_count,
+                adolescente_count = excluded.adolescente_count,
+                jovem_count = excluded.jovem_count,
+                adulto_count = excluded.adulto_count,
+                idoso_count = excluded.idoso_count,
+                homem_count = excluded.homem_count,
+                mulher_count = excluded.mulher_count,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+        (
+            culto_id,
+            next_row["entries_count"],
+            next_row["exits_count"],
+            next_row["returns_count"],
+            next_row["unique_people_count"],
+            next_row["current_occupancy"],
+            next_row["peak_occupancy"],
+            next_row["crianca_count"],
+            next_row["junior_count"],
+            next_row["adolescente_count"],
+            next_row["jovem_count"],
+            next_row["adulto_count"],
+            next_row["idoso_count"],
+            next_row["homem_count"],
+            next_row["mulher_count"],
+        ),
+    )
+
+    conn.execute("DELETE FROM service_event_people WHERE culto_id = ?", (culto_id,))
+    person_rows = [
+        (
+            culto_id,
+            pid,
+            data["first_seen_at"],
+            data["last_seen_at"],
+            int(data["entries_count"]),
+            int(data["exits_count"]),
+            int(data["returns_count"]),
+            data["age_band"],
+            data["gender"],
+            data["last_direction"],
+            data["last_exit_at"],
+        )
+        for pid, data in people.items()
+    ]
+    if person_rows:
+        conn.executemany(
+            """
+                INSERT INTO service_event_people (
+                    culto_id, person_id, first_seen_at, last_seen_at,
+                    entries_count, exits_count, returns_count, age_band, gender,
+                    last_direction, last_exit_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            person_rows,
+        )
+    return changed
+
+
+def write_full_reconciliation_all_partitions(
+    global_stats: dict[str, int],
+    global_people: dict[str, dict[str, Any]],
+    per_culto: list[tuple[str, dict[str, int], dict[str, dict[str, Any]]]],
+) -> int:
+    """Substitui todas as particoes (job no servidor). Retorna 1 se alguma particao de stats mudou."""
+    changed_rows = 0
+    with get_connection() as conn:
+        conn.execute("DELETE FROM service_event_stats")
+        conn.execute("DELETE FROM service_event_people")
+        if _upsert_partition_reconciliation_conn(
+            conn, GLOBAL_STATS_ID, global_stats, global_people
+        ):
+            changed_rows = 1
+        for cid, st, pe in per_culto:
+            if _upsert_partition_reconciliation_conn(conn, cid, st, pe):
+                changed_rows = 1
+        conn.commit()
+    return changed_rows
+
+
+def write_reconciliation_results_to_db(
+    stats: dict[str, int], people: dict[str, dict[str, Any]]
+) -> int:
+    """
+    Conciliacao aplicada pelo browser: atualiza apenas __global__.
+    Nao apaga nem altera outras particoes (culto_id != __global__).
+    """
+    changed_rows = 0
+    with get_connection() as conn:
+        if _upsert_partition_reconciliation_conn(
+            conn, GLOBAL_STATS_ID, stats, people
+        ):
+            changed_rows = 1
+        conn.commit()
+    return changed_rows
+
+
+def apply_reconciliation_from_browser(payload: ReconciliationApplyRequest) -> dict[str, Any]:
+    """Aplica resultado calculado no PC/Mac; so escrita na BD do servidor."""
+    if get_reconciliation_status()["running"]:
+        return {
+            "ok": False,
+            "message": "Conciliacao no servidor em execucao; aguarde terminar.",
+        }
+    people_dict: dict[str, dict[str, Any]] = {}
+    for p in payload.people:
+        d = p.model_dump()
+        pid = str(d.pop("person_id", "")).strip()
+        if not pid:
+            continue
+        people_dict[pid] = d
+    stats = payload.stats.model_dump()
+    changed = write_reconciliation_results_to_db(stats, people_dict)
+    return {
+        "ok": True,
+        "message": f"Conciliacao aplicada. Pessoas: {len(people_dict)}.",
+        "changed_rows": changed,
+        "people_rows": len(people_dict),
+    }
+
+
 def run_reconciliation_job(run_id: str) -> dict[str, Any]:
     started_at = datetime.now(UTC)
     cfg = load_config()
@@ -416,7 +761,15 @@ def run_reconciliation_job(run_id: str) -> dict[str, Any]:
                 """
             ).fetchall()
 
-        total_rows = len(event_rows)
+        rows_list = list(event_rows)
+        total_rows = len(rows_list)
+        by_culto: dict[str, list[Any]] = defaultdict(list)
+        for r in rows_list:
+            cid = derive_report_culto_id_for_event_ts(str(r["event_ts"]))
+            if cid and str(cid).strip():
+                by_culto[str(cid)].append(r)
+
+        total_partitions = 1 + len(by_culto)
         _set_reconciliation_state(
             run_id=run_id,
             status="running",
@@ -424,216 +777,44 @@ def run_reconciliation_job(run_id: str) -> dict[str, Any]:
             processed_events=0,
             total_events=total_rows,
             processed_services=0,
-            total_services=1,
-            message="Iniciando recomputo de métricas (fluxo global)...",
+            total_services=total_partitions,
+            message="Iniciando recomputo de métricas (global e por culto)...",
         )
 
-        entry_seen: set[str] = set()
-        people: dict[str, dict[str, Any]] = {}
-        entries = 0
-        exits = 0
-        returns = 0
-        unique = 0
-        occupancy = 0
-        peak = 0
-        age_counts = {
-            "crianca_count": 0,
-            "junior_count": 0,
-            "adolescente_count": 0,
-            "jovem_count": 0,
-            "adulto_count": 0,
-            "idoso_count": 0,
-        }
-        gender_counts = {"homem_count": 0, "mulher_count": 0}
-        processed = 0
-
-        for row in event_rows:
-            processed += 1
-            person_id = (row["temp_id"] or "").strip()
-            if not person_id:
-                continue
-            direction = row["event_type"]
-            event_ts_s = row["event_ts"]
-            try:
-                event_dt = datetime.fromisoformat(event_ts_s)
-            except ValueError:
-                event_dt = None
-            person = people.get(person_id)
-            if person is None:
-                person = {
-                    "first_seen_at": event_ts_s,
-                    "last_seen_at": event_ts_s,
-                    "entries_count": 0,
-                    "exits_count": 0,
-                    "returns_count": 0,
-                    "age_band": row["age_band"] or None,
-                    "gender": row["gender"] or None,
-                    "last_direction": direction,
-                    "last_exit_at": event_ts_s if direction == "saida" else None,
-                }
-                people[person_id] = person
-
-            person["last_seen_at"] = event_ts_s
-            if not person["age_band"] and row["age_band"]:
-                person["age_band"] = row["age_band"]
-            if not person["gender"] and row["gender"]:
-                person["gender"] = row["gender"]
-
-            if direction == "entrada":
-                entries += 1
-                occupancy += 1
-                if person_id not in entry_seen:
-                    unique += 1
-                    entry_seen.add(person_id)
-                    if person["age_band"] in {
-                        "crianca",
-                        "junior",
-                        "adolescente",
-                        "jovem",
-                        "adulto",
-                        "idoso",
-                    }:
-                        age_counts[f"{person['age_band']}_count"] += 1
-                    if person["gender"] in {"homem", "mulher"}:
-                        gender_counts[f"{person['gender']}_count"] += 1
-
-                if (
-                    person["last_direction"] == "saida"
-                    and person["last_exit_at"]
-                    and event_dt is not None
-                ):
-                    try:
-                        delta = event_dt - datetime.fromisoformat(
-                            person["last_exit_at"]
-                        )
-                        if timedelta(minutes=0) <= delta <= timedelta(
-                            minutes=cfg.janela_reentrada_min
-                        ):
-                            returns += 1
-                            person["returns_count"] += 1
-                    except ValueError:
-                        pass
-                person["entries_count"] += 1
-                person["last_direction"] = "entrada"
-                peak = max(peak, occupancy)
-            elif direction == "saida":
-                exits += 1
-                occupancy = max(0, occupancy - 1)
-                person["exits_count"] += 1
-                person["last_direction"] = "saida"
-                person["last_exit_at"] = event_ts_s
-
-            if total_rows > 0 and processed % 100 == 0:
-                pct = min(95, int((processed / total_rows) * 100))
-                _set_reconciliation_state(
-                    run_id=run_id,
-                    status="running",
-                    progress_pct=pct,
-                    processed_events=processed,
-                    total_events=total_rows,
-                    processed_services=1,
-                    total_services=1,
-                    message=f"Reprocessando eventos {processed}/{total_rows}...",
-                )
-
-        touched_cultos = 1
-        changed_rows = 0
-        with get_connection() as conn:
-            conn.execute("DELETE FROM service_event_stats WHERE culto_id != ?", (GLOBAL_STATS_ID,))
-
-            current_row = conn.execute(
-                "SELECT * FROM service_event_stats WHERE culto_id = ?",
-                (GLOBAL_STATS_ID,),
-            ).fetchone()
-            next_row = {
-                "entries_count": entries,
-                "exits_count": exits,
-                "returns_count": returns,
-                "unique_people_count": unique,
-                "current_occupancy": max(0, occupancy),
-                "peak_occupancy": max(0, peak),
-                **age_counts,
-                **gender_counts,
-            }
-            if current_row is None or any(
-                int(current_row[key]) != int(value) for key, value in next_row.items()
-            ):
-                changed_rows += 1
-
-            conn.execute(
-                """
-                INSERT INTO service_event_stats (
-                    culto_id, entries_count, exits_count, returns_count, unique_people_count,
-                    current_occupancy, peak_occupancy, crianca_count, junior_count,
-                    adolescente_count, jovem_count, adulto_count, idoso_count,
-                    homem_count, mulher_count, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(culto_id) DO UPDATE SET
-                    entries_count = excluded.entries_count,
-                    exits_count = excluded.exits_count,
-                    returns_count = excluded.returns_count,
-                    unique_people_count = excluded.unique_people_count,
-                    current_occupancy = excluded.current_occupancy,
-                    peak_occupancy = excluded.peak_occupancy,
-                    crianca_count = excluded.crianca_count,
-                    junior_count = excluded.junior_count,
-                    adolescente_count = excluded.adolescente_count,
-                    jovem_count = excluded.jovem_count,
-                    adulto_count = excluded.adulto_count,
-                    idoso_count = excluded.idoso_count,
-                    homem_count = excluded.homem_count,
-                    mulher_count = excluded.mulher_count,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    GLOBAL_STATS_ID,
-                    entries,
-                    exits,
-                    returns,
-                    unique,
-                    max(0, occupancy),
-                    max(0, peak),
-                    age_counts["crianca_count"],
-                    age_counts["junior_count"],
-                    age_counts["adolescente_count"],
-                    age_counts["jovem_count"],
-                    age_counts["adulto_count"],
-                    age_counts["idoso_count"],
-                    gender_counts["homem_count"],
-                    gender_counts["mulher_count"],
-                ),
+        def _progress(processed: int, tot: int) -> None:
+            pct = min(95, int((processed / tot) * 100)) if tot > 0 else 0
+            _set_reconciliation_state(
+                run_id=run_id,
+                status="running",
+                progress_pct=pct,
+                processed_events=processed,
+                total_events=tot,
+                processed_services=1,
+                total_services=total_partitions,
+                message=f"Reprocessando eventos {processed}/{tot}...",
             )
 
-            conn.execute("DELETE FROM service_event_people")
-            person_rows = [
-                (
-                    pid,
-                    data["first_seen_at"],
-                    data["last_seen_at"],
-                    int(data["entries_count"]),
-                    int(data["exits_count"]),
-                    int(data["returns_count"]),
-                    data["age_band"],
-                    data["gender"],
-                    data["last_direction"],
-                    data["last_exit_at"],
-                )
-                for pid, data in people.items()
-            ]
-            if person_rows:
-                conn.executemany(
-                    """
-                    INSERT INTO service_event_people (
-                        person_id, first_seen_at, last_seen_at,
-                        entries_count, exits_count, returns_count, age_band, gender,
-                        last_direction, last_exit_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    person_rows,
-                )
-            conn.commit()
+        stats, people = recompute_reconciliation_metrics(
+            rows_list,
+            cfg.janela_reentrada_min,
+            on_progress=_progress,
+        )
 
-        message = f"Conciliação concluída. Eventos: {total_rows}."
+        per_culto: list[tuple[str, dict[str, int], dict[str, dict[str, Any]]]] = []
+        for cid in sorted(by_culto.keys()):
+            st, pe = recompute_reconciliation_metrics(
+                by_culto[cid],
+                cfg.janela_reentrada_min,
+                on_progress=None,
+            )
+            per_culto.append((cid, st, pe))
+
+        touched_cultos = total_partitions
+        changed_rows = write_full_reconciliation_all_partitions(stats, people, per_culto)
+
+        message = (
+            f"Conciliação concluída. Eventos: {total_rows}, partições: {total_partitions}."
+        )
         _set_reconciliation_state(
             run_id=run_id,
             status="done",
@@ -689,6 +870,153 @@ def run_reconciliation_job(run_id: str) -> dict[str, Any]:
             message=err,
         )
         raise
+
+
+def involvement_band_for(visit_days: int, min_membro: int) -> str:
+    """Classifica por dias distintos com entrada na janela (min_membro >= 2)."""
+    if visit_days >= min_membro:
+        return "membro"
+    if visit_days == 1:
+        return "novo"
+    return "visitante"
+
+
+def _involvement_window_params() -> tuple[int, int, str]:
+    cfg = load_config()
+    janela = max(7, min(120, int(cfg.envolvimento_janela_dias)))
+    min_membro = max(2, min(31, int(cfg.envolvimento_visitas_min_membro)))
+    return janela, min_membro, f"-{janela} days"
+
+
+def _involvement_summary_and_total(
+    conn: sqlite3.Connection, mod: str, min_membro: int
+) -> tuple[dict[str, int], int]:
+    total_row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS c FROM (
+          SELECT temp_id FROM events WHERE {_INVOLVEMENT_WHERE_ENTRADA} GROUP BY temp_id
+        )
+        """,
+        (mod,),
+    ).fetchone()
+    total = int(total_row["c"]) if total_row else 0
+
+    summary_rows = conn.execute(
+        f"""
+        SELECT env, COUNT(*) AS c FROM (
+          SELECT CASE
+            WHEN vd >= ? THEN 'membro'
+            WHEN vd = 1 THEN 'novo'
+            ELSE 'visitante'
+          END AS env
+          FROM (
+            SELECT temp_id,
+              COUNT(DISTINCT substr(event_ts, 1, 10)) AS vd
+            FROM events
+            WHERE {_INVOLVEMENT_WHERE_ENTRADA}
+            GROUP BY temp_id
+          )
+        )
+        GROUP BY env
+        """,
+        (min_membro, mod),
+    ).fetchall()
+
+    summary = {"novo": 0, "visitante": 0, "membro": 0}
+    for sr in summary_rows:
+        key = str(sr["env"])
+        if key in summary:
+            summary[key] = int(sr["c"])
+    return summary, total
+
+
+def fetch_involvement_summary_bundle() -> dict[str, Any]:
+    """Resumo global (mesmas regras da lista de envolvimento). Sem cache."""
+    janela, min_membro, mod = _involvement_window_params()
+    with get_connection() as conn:
+        summary, total = _involvement_summary_and_total(conn, mod, min_membro)
+    return {
+        "janela_dias": janela,
+        "visitas_min_para_membro": min_membro,
+        "summary": summary,
+        "total_person_ids": total,
+    }
+
+
+def get_involvement_summary_for_live_metrics() -> dict[str, Any]:
+    """Para o dashboard: cache com TTL + invalidacao em ingest/save_config."""
+    global _involvement_summary_cache, _involvement_summary_cache_time
+    now_m = time_std.monotonic()
+    with _involvement_summary_lock:
+        if _involvement_summary_cache is not None and (
+            now_m - _involvement_summary_cache_time
+        ) < _INVOLVEMENT_SUMMARY_TTL_SEC:
+            return dict(_involvement_summary_cache)
+    fresh = fetch_involvement_summary_bundle()
+    with _involvement_summary_lock:
+        _involvement_summary_cache = fresh
+        _involvement_summary_cache_time = now_m
+    return dict(fresh)
+
+
+def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
+    """
+    Lista person_id (temp_id) com entradas na janela movel; envolvimento derivado
+    de dias distintos com pelo menos uma entrada (nao numero de cultos isolados).
+    """
+    janela, min_membro, mod = _involvement_window_params()
+    with get_connection() as conn:
+        summary, total = _involvement_summary_and_total(conn, mod, min_membro)
+
+        rows = conn.execute(
+            f"""
+            SELECT temp_id AS person_id,
+              COUNT(DISTINCT substr(event_ts, 1, 10)) AS visit_days,
+              MAX(event_ts) AS last_entrada
+            FROM events
+            WHERE {_INVOLVEMENT_WHERE_ENTRADA}
+            GROUP BY temp_id
+            ORDER BY last_entrada DESC
+            LIMIT ? OFFSET ?
+            """,
+            (mod, limit, offset),
+        ).fetchall()
+
+    people: list[dict[str, Any]] = []
+    for r in rows:
+        vd = int(r["visit_days"])
+        band = involvement_band_for(vd, min_membro)
+        people.append(
+            {
+                "person_id": r["person_id"],
+                "visit_days": vd,
+                "envolvimento": band,
+                "last_entrada": r["last_entrada"],
+            }
+        )
+
+    return {
+        "janela_dias": janela,
+        "visitas_min_para_membro": min_membro,
+        "definicoes": {
+            "novo": "1 dia de calendario com pelo menos uma entrada na janela",
+            "visitante": (
+                f"{2} a {min_membro - 1} dias distintos com entrada na janela"
+                if min_membro > 2
+                else "(nao aplicavel se min. para membro = 2)"
+            ),
+            "membro": f"{min_membro} ou mais dias distintos com entrada na janela",
+        },
+        "summary": summary,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "people": people,
+        "nota_identidade": (
+            "Fidedigno quando o edge envia o mesmo person_id em cada visita. "
+            "Deteccao HOG no servidor gera ids de track que mudam — nao use para membro/visitante nesse modo."
+        ),
+    }
 
 
 def latest_cleanup_runs(limit: int = 10) -> list[dict[str, Any]]:
@@ -786,6 +1114,7 @@ def camera_status() -> dict[str, Any]:
         "camera_device_exists": exists,
         "inference_resolution": f"{config.camera_inference_width}x{config.camera_inference_height}",
         "camera_fps": config.camera_fps,
+        "live_detection_enabled": config.live_detection_enabled,
     }
 
 
@@ -1343,8 +1672,9 @@ def resolve_active_service(event_ts: datetime) -> dict[str, Any] | None:
 
 def agenda_display_context(event_ts: datetime) -> dict[str, Any]:
     """
-    Rotulo derivado da agenda (horario aproximado) — apenas para UI / exportacao.
-    Nao persiste em eventos nem define particao de dados operacionais.
+    Contexto de UI a partir da agenda: nome do culto, se esta no horario programado
+    e report_culto_id (chave sintetica). Eventos de deteccao gravam so horario; o culto
+    e sempre derivado de event_ts + agenda para exibicao, graficos e particoes agregadas.
     """
     event_ts = event_ts.astimezone()
     service = resolve_active_service(event_ts)
@@ -1436,8 +1766,6 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
     display = agenda_display_context(event_ts)
     event_ts_s = event_ts.isoformat()
     event_id = str(uuid.uuid4())
-    is_return = False
-    is_new_unique = False
     gender_to_use = payload.gender if config.estimar_genero else None
     if config.estimar_faixa_etaria:
         age_band_to_use = payload.age_band or _resolve_age_band_from_estimate(
@@ -1447,99 +1775,193 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
         age_band_to_use = None
     event_gender = gender_to_use if config.estimar_genero else None
 
+    raw_culto = derive_report_culto_id_for_event_ts(event_ts_s)
+    persist_culto_id = raw_culto.strip() if raw_culto else None
+    targets: list[str] = [GLOBAL_STATS_ID]
+    if persist_culto_id:
+        targets.append(persist_culto_id)
+
+    response_partition = persist_culto_id or GLOBAL_STATS_ID
+    response_is_return = False
+    response_is_new_unique = False
+
     with get_connection() as conn:
-        person = conn.execute(
-            """
-            SELECT *
-            FROM service_event_people
-            WHERE person_id = ?
-            """,
-            (payload.person_id,),
-        ).fetchone()
+        for partition in targets:
+            person = conn.execute(
+                """
+                SELECT *
+                FROM service_event_people
+                WHERE culto_id = ? AND person_id = ?
+                """,
+                (partition, payload.person_id),
+            ).fetchone()
 
-        if person is None:
-            is_new_unique = True
-            if payload.direction == "entrada":
-                entries_count = 1
-                exits_count = 0
-                returns_count = 0
-                last_exit_at = None
+            is_new_unique = person is None
+            is_return = False
+            if person is None:
+                if payload.direction == "entrada":
+                    entries_count = 1
+                    exits_count = 0
+                    returns_count = 0
+                    last_exit_at = None
+                else:
+                    entries_count = 0
+                    exits_count = 1
+                    returns_count = 0
+                    last_exit_at = event_ts_s
+                conn.execute(
+                    """
+                    INSERT INTO service_event_people (
+                        culto_id, person_id, first_seen_at, last_seen_at,
+                        entries_count, exits_count, returns_count, age_band, gender, last_direction, last_exit_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        partition,
+                        payload.person_id,
+                        event_ts_s,
+                        event_ts_s,
+                        entries_count,
+                        exits_count,
+                        returns_count,
+                        age_band_to_use,
+                        gender_to_use,
+                        payload.direction,
+                        last_exit_at,
+                    ),
+                )
             else:
-                entries_count = 0
-                exits_count = 1
-                returns_count = 0
-                last_exit_at = event_ts_s
+                entries_count = int(person["entries_count"])
+                exits_count = int(person["exits_count"])
+                returns_count = int(person["returns_count"])
+                last_direction = person["last_direction"]
+                last_exit_at = person["last_exit_at"]
+                age_band = (
+                    (person["age_band"] or age_band_to_use)
+                    if config.estimar_faixa_etaria
+                    else None
+                )
+                gender = (
+                    (person["gender"] or gender_to_use) if config.estimar_genero else None
+                )
+                if payload.direction == "entrada":
+                    entries_count += 1
+                    if last_direction == "saida" and last_exit_at:
+                        try:
+                            delta = event_ts - datetime.fromisoformat(last_exit_at)
+                            if timedelta(minutes=0) <= delta <= timedelta(
+                                minutes=config.janela_reentrada_min
+                            ):
+                                returns_count += 1
+                                is_return = True
+                        except ValueError:
+                            pass
+                else:
+                    exits_count += 1
+                    last_exit_at = event_ts_s
+
+                conn.execute(
+                    """
+                    UPDATE service_event_people
+                    SET last_seen_at = ?,
+                        entries_count = ?,
+                        exits_count = ?,
+                        returns_count = ?,
+                        age_band = ?,
+                        gender = ?,
+                        last_direction = ?,
+                        last_exit_at = ?
+                    WHERE culto_id = ? AND person_id = ?
+                    """,
+                    (
+                        event_ts_s,
+                        entries_count,
+                        exits_count,
+                        returns_count,
+                        age_band,
+                        gender,
+                        payload.direction,
+                        last_exit_at,
+                        partition,
+                        payload.person_id,
+                    ),
+                )
+
+            if partition == response_partition:
+                response_is_return = is_return
+                response_is_new_unique = is_new_unique
+
+            stats = conn.execute(
+                "SELECT * FROM service_event_stats WHERE culto_id = ?",
+                (partition,),
+            ).fetchone()
+            entries = int(stats["entries_count"]) if stats else 0
+            exits = int(stats["exits_count"]) if stats else 0
+            returns = int(stats["returns_count"]) if stats else 0
+            unique_count = int(stats["unique_people_count"]) if stats else 0
+            current_occupancy = int(stats["current_occupancy"]) if stats else 0
+            peak_occupancy = int(stats["peak_occupancy"]) if stats else 0
+
+            if payload.direction == "entrada":
+                entries += 1
+                current_occupancy += 1
+                if is_return:
+                    returns += 1
+            else:
+                exits += 1
+                current_occupancy = max(0, current_occupancy - 1)
+            if is_new_unique and payload.direction == "entrada":
+                unique_count += 1
+            peak_occupancy = max(peak_occupancy, current_occupancy)
+
+            age_counts = _inc_age_band(
+                stats, age_band_to_use if is_new_unique else None
+            )
+            gender_counts = _inc_gender_band(
+                stats, gender_to_use if is_new_unique else None
+            )
+
             conn.execute(
                 """
-                INSERT INTO service_event_people (
-                    person_id, first_seen_at, last_seen_at,
-                    entries_count, exits_count, returns_count, age_band, gender, last_direction, last_exit_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO service_event_stats (
+                    culto_id, entries_count, exits_count, returns_count, unique_people_count,
+                    current_occupancy, peak_occupancy, crianca_count, junior_count,
+                    adolescente_count, jovem_count, adulto_count, idoso_count,
+                    homem_count, mulher_count, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(culto_id) DO UPDATE SET
+                    entries_count = excluded.entries_count,
+                    exits_count = excluded.exits_count,
+                    returns_count = excluded.returns_count,
+                    unique_people_count = excluded.unique_people_count,
+                    current_occupancy = excluded.current_occupancy,
+                    peak_occupancy = excluded.peak_occupancy,
+                    crianca_count = excluded.crianca_count,
+                    junior_count = excluded.junior_count,
+                    adolescente_count = excluded.adolescente_count,
+                    jovem_count = excluded.jovem_count,
+                    adulto_count = excluded.adulto_count,
+                    idoso_count = excluded.idoso_count,
+                    homem_count = excluded.homem_count,
+                    mulher_count = excluded.mulher_count,
+                    updated_at = CURRENT_TIMESTAMP
                 """,
                 (
-                    payload.person_id,
-                    event_ts_s,
-                    event_ts_s,
-                    entries_count,
-                    exits_count,
-                    returns_count,
-                    age_band_to_use,
-                    gender_to_use,
-                    payload.direction,
-                    last_exit_at,
-                ),
-            )
-        else:
-            entries_count = int(person["entries_count"])
-            exits_count = int(person["exits_count"])
-            returns_count = int(person["returns_count"])
-            last_direction = person["last_direction"]
-            last_exit_at = person["last_exit_at"]
-            age_band = (
-                (person["age_band"] or age_band_to_use)
-                if config.estimar_faixa_etaria
-                else None
-            )
-            gender = (
-                (person["gender"] or gender_to_use) if config.estimar_genero else None
-            )
-            if payload.direction == "entrada":
-                entries_count += 1
-                if last_direction == "saida" and last_exit_at:
-                    try:
-                        delta = event_ts - datetime.fromisoformat(last_exit_at)
-                        if timedelta(minutes=0) <= delta <= timedelta(minutes=config.janela_reentrada_min):
-                            returns_count += 1
-                            is_return = True
-                    except ValueError:
-                        pass
-            else:
-                exits_count += 1
-                last_exit_at = event_ts_s
-
-            conn.execute(
-                """
-                UPDATE service_event_people
-                SET last_seen_at = ?,
-                    entries_count = ?,
-                    exits_count = ?,
-                    returns_count = ?,
-                    age_band = ?,
-                    gender = ?,
-                    last_direction = ?,
-                    last_exit_at = ?
-                WHERE person_id = ?
-                """,
-                (
-                    event_ts_s,
-                    entries_count,
-                    exits_count,
-                    returns_count,
-                    age_band,
-                    gender,
-                    payload.direction,
-                    last_exit_at,
-                    payload.person_id,
+                    partition,
+                    entries,
+                    exits,
+                    returns,
+                    unique_count,
+                    current_occupancy,
+                    peak_occupancy,
+                    age_counts["crianca_count"],
+                    age_counts["junior_count"],
+                    age_counts["adolescente_count"],
+                    age_counts["jovem_count"],
+                    age_counts["adulto_count"],
+                    age_counts["idoso_count"],
+                    gender_counts["homem_count"],
+                    gender_counts["mulher_count"],
                 ),
             )
 
@@ -1558,79 +1980,9 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
                 event_gender,
             ),
         )
-
-        stats = conn.execute(
-            "SELECT * FROM service_event_stats WHERE culto_id = ?",
-            (GLOBAL_STATS_ID,),
-        ).fetchone()
-        entries = int(stats["entries_count"]) if stats else 0
-        exits = int(stats["exits_count"]) if stats else 0
-        returns = int(stats["returns_count"]) if stats else 0
-        unique_count = int(stats["unique_people_count"]) if stats else 0
-        current_occupancy = int(stats["current_occupancy"]) if stats else 0
-        peak_occupancy = int(stats["peak_occupancy"]) if stats else 0
-
-        if payload.direction == "entrada":
-            entries += 1
-            current_occupancy += 1
-            if is_return:
-                returns += 1
-        else:
-            exits += 1
-            current_occupancy = max(0, current_occupancy - 1)
-        if is_new_unique and payload.direction == "entrada":
-            unique_count += 1
-        peak_occupancy = max(peak_occupancy, current_occupancy)
-
-        age_counts = _inc_age_band(stats, age_band_to_use if is_new_unique else None)
-        gender_counts = _inc_gender_band(
-            stats, gender_to_use if is_new_unique else None
-        )
-
-        conn.execute(
-            """
-            INSERT INTO service_event_stats (
-                culto_id, entries_count, exits_count, returns_count, unique_people_count,
-                current_occupancy, peak_occupancy, crianca_count, junior_count,
-                adolescente_count, jovem_count, adulto_count, idoso_count,
-                homem_count, mulher_count, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(culto_id) DO UPDATE SET
-                entries_count = excluded.entries_count,
-                exits_count = excluded.exits_count,
-                returns_count = excluded.returns_count,
-                unique_people_count = excluded.unique_people_count,
-                current_occupancy = excluded.current_occupancy,
-                peak_occupancy = excluded.peak_occupancy,
-                crianca_count = excluded.crianca_count,
-                junior_count = excluded.junior_count,
-                adolescente_count = excluded.adolescente_count,
-                jovem_count = excluded.jovem_count,
-                adulto_count = excluded.adulto_count,
-                idoso_count = excluded.idoso_count,
-                homem_count = excluded.homem_count,
-                mulher_count = excluded.mulher_count,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                GLOBAL_STATS_ID,
-                entries,
-                exits,
-                returns,
-                unique_count,
-                current_occupancy,
-                peak_occupancy,
-                age_counts["crianca_count"],
-                age_counts["junior_count"],
-                age_counts["adolescente_count"],
-                age_counts["jovem_count"],
-                age_counts["adulto_count"],
-                age_counts["idoso_count"],
-                gender_counts["homem_count"],
-                gender_counts["mulher_count"],
-            ),
-        )
         conn.commit()
+
+    invalidate_involvement_summary_cache()
 
     return {
         "event_id": event_id,
@@ -1639,28 +1991,63 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
         "service_name": display["service_name"],
         "scheduled": display["scheduled"],
         "direction": payload.direction,
-        "is_return": is_return,
-        "is_new_unique": is_new_unique,
+        "is_return": response_is_return,
+        "is_new_unique": response_is_new_unique,
         "age_band_used": event_age_band,
         "gender_used": event_gender,
     }
 
 
+def _camera_detection_status() -> dict[str, Any]:
+    """Estado da captura/HOG para o dashboard (a deteccao nao depende da agenda)."""
+    cfg = load_config()
+    opencv = False
+    try:
+        import cv2  # noqa: F401
+
+        opencv = True
+    except ImportError:
+        pass
+    return {
+        "camera_enabled": cfg.camera_enabled,
+        "live_detection_enabled": cfg.live_detection_enabled,
+        "opencv_installed": opencv,
+    }
+
+
+def _resolve_live_partition_id(
+    culto_id_param: str | None, display: dict[str, Any]
+) -> str:
+    """Particao de stats/charts: query explícita, ou culto da agenda, ou agregado global."""
+    req = (culto_id_param or "").strip()
+    if req:
+        return req
+    if display.get("scheduled") and display.get("report_culto_id"):
+        return str(display["report_culto_id"])
+    return GLOBAL_STATS_ID
+
+
 def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
-    _ = culto_id
     now = datetime.now(UTC).astimezone()
     display = agenda_display_context(now)
+    partition = _resolve_live_partition_id(culto_id, display)
+    cam_det = _camera_detection_status()
+    stats_scope = "culto" if partition != GLOBAL_STATS_ID else "global"
 
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM service_event_stats WHERE culto_id = ?",
-            (GLOBAL_STATS_ID,),
+            (partition,),
         ).fetchone()
+
+    involvement = get_involvement_summary_for_live_metrics()
 
     if row is None:
         return {
             "active": True,
-            "culto_id": None,
+            "culto_id": None if partition == GLOBAL_STATS_ID else partition,
+            "stats_scope": stats_scope,
+            "camera_detection": cam_det,
             "report_culto_id": display["report_culto_id"],
             "service_name": display["service_name"],
             "scheduled": display["scheduled"],
@@ -1682,11 +2069,14 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
                 "homem": 0,
                 "mulher": 0,
             },
+            "involvement": involvement,
         }
 
     return {
         "active": True,
-        "culto_id": None,
+        "culto_id": None if partition == GLOBAL_STATS_ID else partition,
+        "stats_scope": stats_scope,
+        "camera_detection": cam_det,
         "report_culto_id": display["report_culto_id"],
         "service_name": display["service_name"],
         "scheduled": display["scheduled"],
@@ -1708,16 +2098,19 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
             "homem": int(row["homem_count"]),
             "mulher": int(row["mulher_count"]),
         },
+        "involvement": involvement,
     }
 
 
 def get_dashboard_charts(
     culto_id: str | None = None, window_minutes: int = 180, bucket_seconds: int = 300
 ) -> dict[str, Any]:
-    _ = culto_id
     safe_window = max(30, min(window_minutes, 24 * 60))
     # Padrao 5 min para leitura de chegadas no grafico; minimo 5 min.
     safe_bucket = max(300, min(bucket_seconds, 3600))
+    now = datetime.now(UTC).astimezone()
+    display = agenda_display_context(now)
+    partition = _resolve_live_partition_id(culto_id, display)
     live = get_live_metrics(culto_id=culto_id)
     if not live.get("active"):
         return {
@@ -1754,11 +2147,18 @@ def get_dashboard_charts(
             """,
             (f"-{safe_window} minutes",),
         ).fetchall()
+    if partition != GLOBAL_STATS_ID:
+        rows = [
+            r
+            for r in rows
+            if derive_report_culto_id_for_event_ts(str(r["event_ts"])).strip()
+            == partition
+        ]
 
     if not rows:
         return {
             "active": True,
-            "culto_id": None,
+            "culto_id": live.get("culto_id"),
             "report_culto_id": live.get("report_culto_id"),
             "service_name": live.get("service_name"),
             "scheduled": live.get("scheduled", True),
@@ -1789,7 +2189,7 @@ def get_dashboard_charts(
     if not events:
         return {
             "active": True,
-            "culto_id": None,
+            "culto_id": live.get("culto_id"),
             "report_culto_id": live.get("report_culto_id"),
             "service_name": live.get("service_name"),
             "scheduled": live.get("scheduled", True),
@@ -1862,7 +2262,7 @@ def get_dashboard_charts(
 
     return {
         "active": True,
-        "culto_id": None,
+        "culto_id": live.get("culto_id"),
         "report_culto_id": live.get("report_culto_id"),
         "service_name": live.get("service_name"),
         "scheduled": live.get("scheduled", True),

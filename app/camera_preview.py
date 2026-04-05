@@ -6,7 +6,16 @@ import threading
 import time
 from typing import Any
 
+import logging
+
 from .retention import load_config
+
+logger = logging.getLogger(__name__)
+
+try:
+    from . import live_detection
+except ImportError:
+    live_detection = None  # type: ignore[assignment]
 
 try:
     import cv2  # type: ignore
@@ -142,20 +151,23 @@ def _capture_loop() -> None:
     while not _STOP.is_set():
         with _LOCK:
             subs = _SUBSCRIBERS
-        if subs <= 0:
+        cfg = load_config()
+        want_preview = subs > 0
+        want_detect = (
+            bool(cfg.live_detection_enabled)
+            and live_detection is not None
+            and getattr(live_detection, "HAS_CV2", False)
+        )
+        if not cfg.camera_enabled or (not want_preview and not want_detect):
             time.sleep(0.05)
             if cap is not None:
                 cap.release()
                 cap = None
-            continue
-
-        cfg = load_config()
-        if not cfg.camera_enabled:
-            jpeg = _placeholder_jpeg("Camera desabilitada\nna configuracao")
-            with _LOCK:
-                _LAST_JPEG = jpeg
-                _LAST_META = {"error": "disabled", "fps": 0.0}
-            time.sleep(0.5)
+            if live_detection is not None:
+                try:
+                    live_detection.reset_tracks()
+                except Exception:
+                    pass
             continue
 
         key = (
@@ -176,11 +188,11 @@ def _capture_loop() -> None:
                     hint = "\nPi/Linux: grupo video?\nsudo usermod -aG video $USER"
                 elif platform.system() == "Darwin":
                     hint = "\nMac: Privacidade > Camera\n(permita Terminal/Cursor)"
-                jpeg = _placeholder_jpeg(
-                    f"Nao abriu a camera:\n{cfg.camera_device}\n(Pi: /dev/video0){hint}"
-                )
                 with _LOCK:
-                    _LAST_JPEG = jpeg
+                    if want_preview:
+                        _LAST_JPEG = _placeholder_jpeg(
+                            f"Nao abriu a camera:\n{cfg.camera_device}\n(Pi: /dev/video0){hint}"
+                        )
                     _LAST_META = {"error": "open_failed", "fps": 0.0}
                 time.sleep(1.0)
                 continue
@@ -190,17 +202,18 @@ def _capture_loop() -> None:
         interval = max(1.0 / max(1, min(30, cfg.camera_fps)), 0.02)
         ok, frame = cap.read()
         if not ok or frame is None:
-            jpeg = _placeholder_jpeg("Falha ao ler frame")
             with _LOCK:
-                _LAST_JPEG = jpeg
+                if want_preview:
+                    _LAST_JPEG = _placeholder_jpeg("Falha ao ler frame")
                 _LAST_META = {"error": "read_failed", "fps": 0.0}
             time.sleep(0.3)
             continue
 
-        enc_ok, buf = _CV2.imencode(
-            ".jpg", frame, [int(_CV2.IMWRITE_JPEG_QUALITY), 78]
-        )
-        jpeg = buf.tobytes() if enc_ok else b""
+        if want_detect and live_detection is not None:
+            try:
+                live_detection.on_frame_bgr(frame)
+            except Exception:
+                logger.exception("live_detection.on_frame_bgr falhou")
 
         n_frames += 1
         elapsed = time.perf_counter() - t0
@@ -209,9 +222,17 @@ def _capture_loop() -> None:
             t0 = time.perf_counter()
             n_frames = 0
 
-        with _LOCK:
-            _LAST_JPEG = jpeg
-            _LAST_META = {"error": "", "fps": round(fps, 1)}
+        if want_preview:
+            enc_ok, buf = _CV2.imencode(
+                ".jpg", frame, [int(_CV2.IMWRITE_JPEG_QUALITY), 78]
+            )
+            jpeg = buf.tobytes() if enc_ok else b""
+            with _LOCK:
+                _LAST_JPEG = jpeg
+                _LAST_META = {"error": "", "fps": round(fps, 1)}
+        else:
+            with _LOCK:
+                _LAST_META = {"error": "", "fps": round(fps, 1)}
 
         time.sleep(interval)
 
@@ -226,6 +247,12 @@ def _ensure_thread() -> None:
             _STOP.clear()
             _THREAD = threading.Thread(target=_capture_loop, daemon=True)
             _THREAD.start()
+
+
+def ensure_background_capture() -> None:
+    """Garante thread de captura (preview e/ou deteccao HOG em background)."""
+    if HAS_CV2:
+        _ensure_thread()
 
 
 def subscribe() -> None:

@@ -23,6 +23,7 @@ from .db import init_db
 from .models import (
     CameraDeviceSelect,
     EventIngestRequest,
+    ReconciliationApplyRequest,
     RetentionConfig,
     ServiceScheduleCreate,
     ServiceScheduleOut,
@@ -30,6 +31,7 @@ from .models import (
 )
 from .retention import (
     apply_camera_device,
+    apply_reconciliation_from_browser,
     camera_status,
     create_schedule,
     get_update_history,
@@ -40,9 +42,11 @@ from .retention import (
     get_reconciliation_runs,
     get_reconciliation_status,
     get_live_metrics,
+    get_people_involvement,
     ingest_event,
     latest_cleanup_runs,
     list_camera_devices,
+    list_events_for_reconciliation_export,
     list_schedules,
     load_config,
     request_reconciliation_run,
@@ -56,6 +60,7 @@ from .retention import (
 from .camera_devices import list_detected_cameras
 from .camera_preview import (
     HAS_CV2,
+    ensure_background_capture,
     get_last_jpeg,
     get_preview_status,
     iter_mjpeg,
@@ -99,6 +104,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
+    ensure_background_capture()
     asyncio.create_task(_auto_cleanup_loop())
     asyncio.create_task(_google_sync_loop())
 
@@ -318,13 +324,27 @@ async def api_ingest_event(payload: EventIngestRequest) -> JSONResponse:
 
 
 @app.get("/api/metrics/live")
-async def api_live_metrics(culto_id: str | None = None) -> JSONResponse:
+async def api_live_metrics(
+    culto_id: str | None = Query(default=None, description="Particao; omisso = culto ativo na agenda ou __global__"),
+) -> JSONResponse:
     return JSONResponse(content=get_live_metrics(culto_id=culto_id))
+
+
+@app.get("/api/people/involvement")
+async def api_people_involvement(
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0, le=500_000),
+) -> JSONResponse:
+    data = await asyncio.to_thread(get_people_involvement, limit=limit, offset=offset)
+    return JSONResponse(content=data)
 
 
 @app.get("/api/metrics/charts")
 async def api_metrics_charts(
-    culto_id: str | None = None,
+    culto_id: str | None = Query(
+        default=None,
+        description="Particao do grafico; omisso = culto ativo na agenda ou global (filtro por horario+agenda, nao por coluna em events)",
+    ),
     window_minutes: int = Query(default=180, ge=30, le=24 * 60),
     bucket_seconds: int = Query(default=300, ge=300, le=3600),
 ) -> JSONResponse:
@@ -355,6 +375,25 @@ async def api_reconciliation_run() -> JSONResponse:
         run_id = str(result.get("run_id", "")).strip()
         if run_id:
             _schedule_thread_job(run_reconciliation_job, run_id)
+    return JSONResponse(content=result)
+
+
+@app.get("/api/reconciliation/events")
+async def api_reconciliation_events() -> JSONResponse:
+    events = await asyncio.to_thread(list_events_for_reconciliation_export)
+    return JSONResponse(content={"events": events, "count": len(events)})
+
+
+@app.post("/api/reconciliation/apply")
+async def api_reconciliation_apply(
+    payload: ReconciliationApplyRequest,
+) -> JSONResponse:
+    result = await asyncio.to_thread(apply_reconciliation_from_browser, payload)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=409,
+            detail=str(result.get("message", "Conflito")),
+        )
     return JSONResponse(content=result)
 
 
@@ -398,6 +437,7 @@ async def save_config_form(
     camera_inference_width: int = Form(...),
     camera_inference_height: int = Form(...),
     camera_fps: int = Form(...),
+    live_detection_enabled: str | None = Form(None),
     culto_antecedencia_min: int = Form(...),
     culto_duracao_min: int = Form(...),
     estimar_faixa_etaria: str | None = Form(None),
@@ -415,6 +455,8 @@ async def save_config_form(
     idade_limite_adolescente: int = Form(...),
     idade_limite_jovem: int = Form(...),
     idade_limite_adulto: int = Form(...),
+    envolvimento_janela_dias: int = Form(...),
+    envolvimento_visitas_min_membro: int = Form(...),
 ) -> RedirectResponse:
     try:
         payload = RetentionConfig(
@@ -433,6 +475,7 @@ async def save_config_form(
             camera_inference_width=camera_inference_width,
             camera_inference_height=camera_inference_height,
             camera_fps=camera_fps,
+            live_detection_enabled=live_detection_enabled is not None,
             culto_antecedencia_min=culto_antecedencia_min,
             culto_duracao_min=culto_duracao_min,
             estimar_faixa_etaria=estimar_faixa_etaria is not None,
@@ -450,6 +493,8 @@ async def save_config_form(
             idade_limite_adolescente=idade_limite_adolescente,
             idade_limite_jovem=idade_limite_jovem,
             idade_limite_adulto=idade_limite_adulto,
+            envolvimento_janela_dias=envolvimento_janela_dias,
+            envolvimento_visitas_min_membro=envolvimento_visitas_min_membro,
         )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc

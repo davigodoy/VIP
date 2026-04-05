@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field, model_validator
 AgeBand = Literal["crianca", "junior", "adolescente", "jovem", "adulto", "idoso"]
 GenderBand = Literal["homem", "mulher"]
 
-
 class RetentionConfig(BaseModel):
     retencao_temp_id_horas: int = Field(ge=0, le=720)
     retencao_profile_dias: int = Field(ge=1, le=3650)
@@ -25,6 +24,7 @@ class RetentionConfig(BaseModel):
     camera_inference_width: int = Field(ge=160, le=1920)
     camera_inference_height: int = Field(ge=120, le=1080)
     camera_fps: int = Field(ge=1, le=60)
+    live_detection_enabled: bool
     culto_antecedencia_min: int = Field(ge=0, le=180)
     culto_duracao_min: int = Field(ge=30, le=360)
     estimar_faixa_etaria: bool
@@ -42,6 +42,16 @@ class RetentionConfig(BaseModel):
     idade_limite_adolescente: int = Field(ge=5, le=60)
     idade_limite_jovem: int = Field(ge=10, le=80)
     idade_limite_adulto: int = Field(ge=10, le=100)
+    envolvimento_janela_dias: int = Field(
+        ge=7,
+        le=120,
+        description="Janela movel (ex.: 30) para contar dias com entrada.",
+    )
+    envolvimento_visitas_min_membro: int = Field(
+        ge=2,
+        le=31,
+        description="Minimo de dias distintos com entrada na janela para classificar como membro/frequentador.",
+    )
 
     @model_validator(mode="after")
     def validate_age_limits(self) -> "RetentionConfig":
@@ -103,6 +113,46 @@ class ServiceScheduleOut(BaseModel):
     day_of_week: int
     start_time: str
     is_active: bool
+
+
+class ReconciliationPersonComputed(BaseModel):
+    """Uma linha de service_event_people apos recomputo."""
+
+    culto_id: str = Field(default="__global__", max_length=120)
+    person_id: str = Field(min_length=1, max_length=120)
+    first_seen_at: str
+    last_seen_at: str
+    entries_count: int = Field(ge=0)
+    exits_count: int = Field(ge=0)
+    returns_count: int = Field(ge=0)
+    age_band: AgeBand | None = None
+    gender: GenderBand | None = None
+    last_direction: Literal["entrada", "saida"]
+    last_exit_at: str | None = None
+
+
+class ReconciliationStatsComputed(BaseModel):
+    entries_count: int = Field(ge=0)
+    exits_count: int = Field(ge=0)
+    returns_count: int = Field(ge=0)
+    unique_people_count: int = Field(ge=0)
+    current_occupancy: int = Field(ge=0)
+    peak_occupancy: int = Field(ge=0)
+    crianca_count: int = Field(ge=0)
+    junior_count: int = Field(ge=0)
+    adolescente_count: int = Field(ge=0)
+    jovem_count: int = Field(ge=0)
+    adulto_count: int = Field(ge=0)
+    idoso_count: int = Field(ge=0)
+    homem_count: int = Field(ge=0)
+    mulher_count: int = Field(ge=0)
+
+
+class ReconciliationApplyRequest(BaseModel):
+    """Resultado calculado no browser para gravar no servidor (so escrita na BD)."""
+
+    stats: ReconciliationStatsComputed
+    people: list[ReconciliationPersonComputed] = Field(default_factory=list, max_length=200_000)
 
 
 class EventIngestRequest(BaseModel):
