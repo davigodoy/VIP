@@ -2,6 +2,14 @@
   box-sizing: border-box;
 }
 
+/*
+ * Breakpoints (mobile-first mental model):
+ *   <=900px  — telemovel landscape, tablet estreito: menu no topo, graficos 1 coluna
+ *   <=768px  — telemovel retrato / iPhone: tabelas em cartoes, cultos em coluna, formularios 1 col
+ *   <=640px  — cartoes e botoes confortaveis para dedo
+ *   <=480px  — telemovel estreito: metricas 1 coluna, safe-area (entalhe iPhone)
+ */
+
 /* Base legivel em telemovel: ~17px; evita herdar 12–13px em demasia */
 html {
   font-size: clamp(16px, 0.2rem + 3.2vw, 18px);
@@ -22,6 +30,8 @@ body {
   display: grid;
   grid-template-columns: 230px 1fr;
   min-height: 100vh;
+  min-width: 0;
+  width: 100%;
 }
 
 .sidebar {
@@ -65,6 +75,7 @@ body {
   margin: 0 auto;
   padding: 1.1rem 1rem 1.5rem;
   width: 100%;
+  min-width: 0;
 }
 
 .topbar {
@@ -363,8 +374,8 @@ button.danger {
   overflow-x: auto;
 }
 
-/* Tabelas largas viram "cartoes" empilhados em telemovel (sem zoom horizontal) */
-@media (max-width: 720px) {
+/* Tabelas largas viram "cartoes" empilhados (telemovel / tablet estreito) */
+@media (max-width: 768px) {
   .table-wrap--stack {
     overflow-x: visible;
   }
@@ -502,7 +513,7 @@ details[open] summary {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .camera-config-grid {
     grid-template-columns: 1fr;
   }
@@ -602,7 +613,13 @@ thead {
   background: #f9fafb;
 }
 
-@media (max-width: 1024px) {
+/* <=900px: iPhone landscape (~844px), tablets estreitos — deixa de haver sidebar fixa */
+@media (max-width: 900px) {
+  body {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
   }
@@ -616,15 +633,27 @@ thead {
     margin-bottom: 0.75rem;
   }
 
+  /* Uma fila com scroll horizontal: menos altura que muitas linhas de links */
   .menu {
+    display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 6px;
+    margin: 0 -4px;
+    padding-left: 4px;
+    padding-right: 4px;
   }
 
   .menu a {
+    flex: 0 0 auto;
     min-height: 44px;
     padding: 10px 14px;
+    white-space: nowrap;
   }
 
   .chart-grid {
@@ -632,7 +661,7 @@ thead {
   }
 }
 
-@media (max-width: 980px) {
+@media (max-width: 768px) {
   .schedule-row {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -660,9 +689,7 @@ thead {
     width: 100%;
     min-height: 46px;
   }
-}
 
-@media (max-width: 768px) {
   .schedule-row .inline-actions {
     justify-content: flex-start;
     flex-wrap: wrap;
@@ -700,11 +727,19 @@ thead {
   .topbar .secondary {
     width: 100%;
   }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 480px) {
   .live-grid {
     grid-template-columns: 1fr;
+  }
+
+  .vip-toast-host {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -774,7 +809,7 @@ thead {
   margin: 0;
   padding: 12px 16px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1.45;
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
   opacity: 0;
