@@ -215,7 +215,18 @@ copy_project() {
 install_python_deps() {
   echo "[3/6] Instalando dependencias Python..."
   sudo -u "$RUN_USER" "$PYTHON_BIN" -m pip install -r "$INSTALL_DIR/requirements.txt" --break-system-packages
-  echo "Opcional (idade/sexo no HOG): como $RUN_USER, correr $INSTALL_DIR/scripts/download_demographics_models.sh"
+  echo "[3b/6] Modelos DNN (idade/sexo no HOG)..."
+  DL_SCRIPT="$INSTALL_DIR/scripts/download_demographics_models.sh"
+  if [[ -f "$DL_SCRIPT" ]]; then
+    chmod +x "$DL_SCRIPT" 2>/dev/null || true
+    if sudo -u "$RUN_USER" bash "$DL_SCRIPT"; then
+      :
+    else
+      echo "Aviso: download dos modelos DNN falhou (rede?). Correr depois: sudo -u $RUN_USER $DL_SCRIPT"
+    fi
+  else
+    echo "Aviso: $DL_SCRIPT nao encontrado."
+  fi
 }
 
 generate_service_file() {

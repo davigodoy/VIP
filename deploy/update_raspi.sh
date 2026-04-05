@@ -100,7 +100,7 @@ if ! id "$RUN_USER" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[1/5] Atualizando codigo (fetch + limpar nao rastreados + reset para origin)..."
+echo "[1/6] Atualizando codigo (fetch + limpar nao rastreados + reset para origin)..."
 # pull --ff-only falha com modificacoes locais ou arquivos soltos que conflitam com o repo.
 # Em instalacao tipo appliance, o codigo deve espelhar o GitHub; dados ficam em data/ (gitignore).
 # -c safe.directory=... evita "dubious ownership" (ex.: repo dono pi, SSH como admin).
@@ -113,21 +113,35 @@ sudo -u "$RUN_USER" "${GSAFE[@]}" -C "$INSTALL_DIR" fetch origin "$BRANCH"
 sudo -u "$RUN_USER" "${GSAFE[@]}" -C "$INSTALL_DIR" clean -fd
 sudo -u "$RUN_USER" "${GSAFE[@]}" -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
 
-echo "[2/5] Instalando/atualizando dependencias Python..."
+echo "[2/6] Instalando/atualizando dependencias Python..."
 if [[ -x "$INSTALL_DIR/.venv/bin/pip" ]]; then
   sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 else
   sudo -u "$RUN_USER" "$PYTHON_BIN" -m pip install --break-system-packages -r "$INSTALL_DIR/requirements.txt"
 fi
 
-echo "[3/5] Verificando sintaxe Python..."
+echo "[3/6] Modelos DNN (idade/sexo no HOG)..."
+DL_SCRIPT="$INSTALL_DIR/scripts/download_demographics_models.sh"
+if [[ -f "$DL_SCRIPT" ]]; then
+  chmod +x "$DL_SCRIPT" 2>/dev/null || true
+  if sudo -u "$RUN_USER" bash "$DL_SCRIPT"; then
+    :
+  else
+    echo "Aviso: download dos modelos DNN falhou (rede indisponivel?). O VIP sobe na mesma;" \
+      "HOG sem idade/sexo ate correr: sudo -u $RUN_USER $DL_SCRIPT"
+  fi
+else
+  echo "Aviso: nao encontrado $DL_SCRIPT (demografia HOG indisponivel)."
+fi
+
+echo "[4/6] Verificando sintaxe Python..."
 if [[ -x "$INSTALL_DIR/.venv/bin/python" ]]; then
   sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/python" -m compileall "$INSTALL_DIR/app"
 else
   sudo -u "$RUN_USER" "$PYTHON_BIN" -m compileall "$INSTALL_DIR/app"
 fi
 
-echo "[4/5] Aplicando migracoes (init DB)..."
+echo "[5/6] Aplicando migracoes (init DB)..."
 # stdin sem cwd deixa de incluir o pacote app no path; e obrigatorio cd ao INSTALL_DIR.
 if [[ -x "$INSTALL_DIR/.venv/bin/python" ]]; then
   _vip_py="$INSTALL_DIR/.venv/bin/python"
@@ -137,11 +151,11 @@ fi
 sudo -u "$RUN_USER" bash -c 'cd "$1" && exec "$2" -c "from app.db import init_db; init_db(); print(\"DB OK\")"' bash "$INSTALL_DIR" "$_vip_py"
 
 if [[ "$SKIP_RESTART" -eq 0 ]]; then
-  echo "[5/5] Reiniciando vip-dashboard.service..."
+  echo "[6/6] Reiniciando vip-dashboard.service..."
   systemctl restart vip-dashboard.service
   systemctl status vip-dashboard.service --no-pager || true
 else
-  echo "[5/5] Reinicio ignorado (--skip-restart)."
+  echo "[6/6] Reinicio ignorado (--skip-restart)."
 fi
 
 echo "Atualizacao concluida com sucesso."

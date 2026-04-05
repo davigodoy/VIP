@@ -132,7 +132,7 @@ Opcoes adicionais:
 
 **Raspberry Pi 4:** o preview no painel e so video (JPEG). Opcionalmente, em **Configuracao da camera**, podes ligar **Deteccao automatica** (OpenCV HOG no mesmo thread de captura): corre em **segundo plano** sem abrir o preview, gera `entrada`/`saida` via a mesma logica que `ingest` — com o custo de CPU e imprecisao tipicos do HOG. Em Linux o `pip` nao instala `pyobjc-framework-AVFoundation` (so macOS). Mantenha resolucao/FPS moderados (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
 
-**Idade/sexo no HOG (opcional):** na raiz do projeto, correr `./scripts/download_demographics_models.sh` para colocar os `.caffemodel` em `data/opencv_dnn_models/`. No painel, ligue **Estimar faixa etaria** e/ou **Estimar genero** (secao Faixas etarias e genero). Cada nova **entrada** HOG recorta a caixa da pessoa, tenta detetar rosto (Haar) e corre as redes Caffe; sem rosto ou sem pesos, o evento fica sem demografia. Variavel `VIP_SKIP_DEMOGRAPHICS=1` desliga a inferencia (debug). O treino ou rotulacao manual ficam fora deste painel; a **conciliacao** existente continua a recomputar agregados a partir de `events`.
+**Idade/sexo no HOG (opcional):** os `.caffemodel` vao para `data/opencv_dnn_models/` — o **`update_raspi.sh`** / **`setup_raspi.sh`** tentam baixa-los automaticamente (rede necessaria); tambem podes correr `./scripts/download_demographics_models.sh` à mao. No painel, ligue **Estimar faixa etaria** e/ou **Estimar genero** (secao Faixas etarias e genero). Cada nova **entrada** HOG recorta a caixa da pessoa, tenta detetar rosto (Haar) e corre as redes Caffe; sem rosto ou sem pesos, o evento fica sem demografia. Variavel `VIP_SKIP_DEMOGRAPHICS=1` desliga a inferencia (debug). O treino ou rotulacao manual ficam fora deste painel; a **conciliacao** existente continua a recomputar agregados a partir de `events`.
 
 Acesso remoto:
 - `http://IP_DO_RASPBERRY:8000`
@@ -174,7 +174,7 @@ Secao **Atualizacoes**:
 - execucao de update em background
 - barra de progresso, etapa atual e historico de execucoes
 
-O job equivale, em termos de passos, ao `deploy/update_raspi.sh`: `git fetch`, `git clean -fd`, `git reset --hard origin/<branch>`, `pip install -r requirements.txt` com o **mesmo interpretador Python** do processo do uvicorn, `compileall app`, `init_db()` e tentativa de `systemctl restart vip-dashboard.service`. Os passos de systemd sao **tolerantes a falha** (avisos no log) se o utilizador do servico nao tiver permissao para reiniciar a unidade.
+O job equivale, em termos de passos, ao `deploy/update_raspi.sh`: `git fetch`, `git clean -fd`, `git reset --hard origin/<branch>`, `pip install -r requirements.txt` com o **mesmo interpretador Python** do processo do uvicorn, **`scripts/download_demographics_models.sh`** (idempotente: so baixa se faltarem os `.caffemodel`; falha de rede gera aviso mas nao bloqueia o update), `compileall app`, `init_db()` e tentativa de `systemctl restart vip-dashboard.service`. Os passos de systemd sao **tolerantes a falha** (avisos no log) se o utilizador do servico nao tiver permissao para reiniciar a unidade.
 
 **Desenvolvimento no PC:** este fluxo **apaga** commits locais nao enviados no Pi se correres update pelo painel ou `update_raspi.sh`. No laptop usa `git pull` normalmente.
 

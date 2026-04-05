@@ -2,7 +2,10 @@
 
 Os ficheiros `*.caffemodel` sao grandes (~40 MB cada) e **nao** estao no Git.
 
-No Raspberry Pi ou na maquina de desenvolvimento:
+No Pi, o **`deploy/update_raspi.sh`** e o **`deploy/setup_raspi.sh`** chamam automaticamente
+`scripts/download_demographics_models.sh` (so descarrega o que faltar; precisa de rede).
+
+Manualmente (qualquer maquina):
 
 ```bash
 chmod +x scripts/download_demographics_models.sh
