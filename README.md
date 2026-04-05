@@ -156,6 +156,20 @@ sudo systemctl status vip-dashboard.service
 
 ## API
 
+### Painel com metricas sempre a zero
+
+Este projeto é o **painel web + API**. Não inclui, no servidor do dashboard, deteção de pessoas no vídeo: o preview só mostra JPEG. Quem incrementa entradas/saídas é um **outro processo** (o teu “edge”) que chama `POST /api/events/ingest` com `person_id` e `direction`.
+
+Teste rápido no Pi (ajusta host/porta ao teu serviço):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/events/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{"person_id":"diag1","direction":"entrada"}'
+```
+
+Se as métricas no painel subirem, a API e a base estão corretas; em produção falta garantir que o serviço de visão/track corre e aponta para a mesma URL.
+
 ### Eventos e metricas
 
 - `POST /api/events/ingest`

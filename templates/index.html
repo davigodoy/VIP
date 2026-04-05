@@ -37,6 +37,7 @@
       <section id="sec-dashboard" class="card live-card">
         <h2>Dashboard em tempo real</h2>
         <p class="help">Atualizacao automatica a cada 5s.</p>
+        <p class="warn">A contagem <strong>só aumenta</strong> se um programa à parte (edge, junto da câmera) enviar eventos para <code>POST /api/events/ingest</code>. O preview de vídeo <strong>não</strong> deteta nem conta pessoas — sem esse envio, os números ficam em zero mesmo com a imagem OK.</p>
         <div id="live-status" class="pill">Carregando...</div>
         <div class="live-grid">
           <div class="metric-box"><span class="metric-label">Ocupacao atual</span><span id="m-current" class="metric-value">-</span></div>
