@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <div id="vip-toast-host" class="vip-toast-host" aria-live="polite" aria-relevant="additions"></div>
   <main class="app-shell">
     <aside class="sidebar card">
       <h2>Sistema VIP</h2>
@@ -260,10 +261,15 @@
 
         <section id="sec-config-retencao" class="card">
           <h2>Retencao e limpeza</h2>
+          <p class="help">
+            O arquivo para analise em <strong>semanas ou meses</strong> e a tabela <code>events</code> (cada entrada/saida com horario).
+            O campo <strong>Eventos (dias)</strong> define quanto tempo esses registos ficam na base antes da limpeza automatica apagar os mais antigos (por defeito <strong>180</strong>; pode subir, ex. 365, se quiseres mais de meio ano).
+            O painel ao vivo mostra agregados <strong>do instante</strong>, nao um historico diario guardado automaticamente — para totais passados usa conciliacao/exportacao a partir de <code>events</code> ou Google Sheets.
+          </p>
           <div class="grid">
-            <label>Temp ID (horas)<input type="number" name="retencao_temp_id_horas" min="0" max="720" value="{{ config.retencao_temp_id_horas }}" required /></label>
+            <label>Temp ID (horas)<input type="number" name="retencao_temp_id_horas" min="0" max="720" value="{{ config.retencao_temp_id_horas }}" required title="Tracks temporarios; curto" /></label>
             <label>Profile ID (dias)<input type="number" name="retencao_profile_dias" min="1" max="3650" value="{{ config.retencao_profile_dias }}" required /></label>
-            <label>Eventos (dias)<input type="number" name="retencao_eventos_dias" min="1" max="3650" value="{{ config.retencao_eventos_dias }}" required /></label>
+            <label>Eventos (dias)<input type="number" name="retencao_eventos_dias" min="1" max="3650" value="{{ config.retencao_eventos_dias }}" required title="Historico bruto entrada/saida; reconciliacao e analise longa" /></label>
             <label>Agregados (meses)<input type="number" name="retencao_agregados_meses" min="1" max="120" value="{{ config.retencao_agregados_meses }}" required /></label>
             <label>Imagens/Snapshots (horas)<input type="number" name="retencao_imagens_horas" min="0" max="720" value="{{ config.retencao_imagens_horas }}" required /></label>
             <label>Janela de reentrada (min)<input type="number" name="janela_reentrada_min" min="1" max="240" value="{{ config.janela_reentrada_min }}" required /></label>
@@ -294,7 +300,7 @@
         <div class="reconcile-actions">
           <button type="button" id="envolvimento-refresh" class="secondary">Atualizar lista</button>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap table-wrap--stack">
           <table>
             <thead>
               <tr>
@@ -336,7 +342,7 @@
           <progress id="update-progress" max="100" value="{{ update_status.progress_pct or 0 }}"></progress>
           <span id="update-progress-label">{{ update_status.progress_pct or 0 }}%</span>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap table-wrap--stack">
           <table>
             <thead>
               <tr>
@@ -426,7 +432,7 @@
           <span id="reconcile-progress-label">0%</span>
         </div>
         <p id="reconcile-message" class="help"></p>
-        <div class="table-wrap">
+        <div class="table-wrap table-wrap--stack">
           <table>
             <thead>
               <tr>
@@ -463,7 +469,7 @@
 
       <section class="card">
         <h2>Historico de limpezas</h2>
-        <div class="table-wrap">
+        <div class="table-wrap table-wrap--stack">
           <table>
             <thead>
               <tr>
@@ -479,13 +485,13 @@
             <tbody>
               {% for run in runs %}
               <tr>
-                <td>{{ run.run_ts }}</td>
-                <td>{% if run.dry_run %}Dry-run{% else %}Real{% endif %}</td>
-                <td>{{ run.deleted_or_would_delete.temp_tracks }}</td>
-                <td>{{ run.deleted_or_would_delete.profiles }}</td>
-                <td>{{ run.deleted_or_would_delete.events }}</td>
-                <td>{{ run.deleted_or_would_delete.aggregated_metrics }}</td>
-                <td>{{ run.deleted_or_would_delete.snapshots }}</td>
+                <td data-label="Data/hora">{{ run.run_ts }}</td>
+                <td data-label="Modo">{% if run.dry_run %}Dry-run{% else %}Real{% endif %}</td>
+                <td data-label="Temp IDs">{{ run.deleted_or_would_delete.temp_tracks }}</td>
+                <td data-label="Profiles">{{ run.deleted_or_would_delete.profiles }}</td>
+                <td data-label="Events">{{ run.deleted_or_would_delete.events }}</td>
+                <td data-label="Agregados">{{ run.deleted_or_would_delete.aggregated_metrics }}</td>
+                <td data-label="Snapshots">{{ run.deleted_or_would_delete.snapshots }}</td>
               </tr>
               {% else %}
               <tr>
@@ -513,6 +519,49 @@
         return new URL(p, base).href;
       } catch (e) {
         return '/' + p;
+      }
+    }
+
+    const VIP_TOAST_DEFAULT_MS = 4800;
+
+    function showVipToast(message, variant = 'success', durationMs = VIP_TOAST_DEFAULT_MS) {
+      const host = document.getElementById('vip-toast-host');
+      if (!host || !message) return;
+      const el = document.createElement('p');
+      el.className = `vip-toast vip-toast--${variant === 'error' ? 'error' : variant === 'info' ? 'info' : 'success'}`;
+      el.setAttribute('role', 'status');
+      el.textContent = message;
+      host.appendChild(el);
+      requestAnimationFrame(() => el.classList.add('vip-toast--visible'));
+      const ms = typeof durationMs === 'number' && durationMs > 0 ? durationMs : VIP_TOAST_DEFAULT_MS;
+      setTimeout(() => {
+        el.classList.remove('vip-toast--visible');
+        setTimeout(() => el.remove(), 320);
+      }, ms);
+    }
+
+    function consumeUrlToast() {
+      try {
+        const u = new URL(window.location.href);
+        const key = u.searchParams.get('toast');
+        if (!key) return;
+        const map = {
+          config_saved: ['Configuracao gravada com sucesso.', 'success'],
+          schedule_created: ['Culto adicionado.', 'success'],
+          schedule_updated: ['Culto atualizado.', 'success'],
+          schedule_deleted: ['Culto removido.', 'success'],
+          cleanup_dry: ['Simulacao de limpeza concluida (dry-run).', 'info'],
+          cleanup_real: ['Limpeza real executada.', 'success'],
+        };
+        const row = map[key];
+        if (row) showVipToast(row[0], row[1]);
+        else showVipToast('Operacao concluida.', 'info');
+        u.searchParams.delete('toast');
+        const qs = u.searchParams.toString();
+        const tail = u.pathname + (qs ? `?${qs}` : '') + (u.hash || '');
+        window.history.replaceState({}, '', tail);
+      } catch (e) {
+        /* ignore */
       }
     }
 
@@ -752,8 +801,14 @@
           const res = await fetch(vipUrl('api/sync/run'), { method: 'POST' });
           const data = await res.json();
           if (out) out.textContent = `${data.status}: ${data.rows_synced} linhas (${data.message})`;
+          if (res.ok) {
+            showVipToast(`Planilha: ${data.rows_synced ?? 0} linha(s) sincronizadas.`, 'success');
+          } else {
+            showVipToast(data.message || 'Sincronizacao recusada pelo servidor.', 'error', 7000);
+          }
         } catch (err) {
           if (out) out.textContent = 'Falha na sincronizacao';
+          showVipToast('Falha de rede na sincronizacao.', 'error');
         }
       });
     }
@@ -835,11 +890,13 @@
             msg = (await er.text()).slice(0, 200);
           }
           if (previewMeta) previewMeta.textContent = msg;
+          showVipToast(msg, 'error', 6500);
           previewActive = false;
           return;
         }
       } catch (e) {
         if (previewMeta) previewMeta.textContent = 'Falha ao contactar o servidor.';
+        showVipToast('Falha ao iniciar o preview.', 'error');
         previewActive = false;
         return;
       }
@@ -902,11 +959,11 @@
       }
       body.innerHTML = runs.map((run) => `
         <tr>
-          <td>${run.started_at || '-'}</td>
-          <td>${run.finished_at || '-'}</td>
-          <td>${run.status || '-'}</td>
-          <td>${run.current_step || '-'}</td>
-          <td>${run.message || '-'}</td>
+          <td data-label="Inicio">${run.started_at || '-'}</td>
+          <td data-label="Fim">${run.finished_at || '-'}</td>
+          <td data-label="Status">${run.status || '-'}</td>
+          <td data-label="Passo">${run.current_step || '-'}</td>
+          <td data-label="Mensagem">${run.message || '-'}</td>
         </tr>
       `).join('');
     }
@@ -974,7 +1031,9 @@
           try {
             data = raw ? JSON.parse(raw) : {};
           } catch (parseErr) {
-            setText('upd-last-msg', `Resposta invalida (HTTP ${res.status}). ${raw.slice(0, 240)}`);
+            const bad = `Resposta invalida (HTTP ${res.status}). ${raw.slice(0, 240)}`;
+            setText('upd-last-msg', bad);
+            showVipToast('Resposta invalida do servidor ao atualizar.', 'error', 8000);
             await refreshUpdates(false);
             return;
           }
@@ -986,12 +1045,16 @@
                 ? detail
                 : data.message || `HTTP ${res.status}`;
             setText('upd-last-msg', msg);
+            showVipToast(msg, 'error', 8000);
           } else {
-            setText('upd-last-msg', data.message || 'Update solicitado');
+            const okMsg = data.message || 'Update solicitado';
+            setText('upd-last-msg', okMsg);
+            showVipToast(okMsg, 'info');
           }
           await refreshUpdates(false);
         } catch (err) {
           setText('upd-last-msg', 'Falha ao iniciar atualizacao');
+          showVipToast('Falha de rede ao iniciar atualizacao.', 'error');
         }
       });
     }
@@ -1013,12 +1076,12 @@
       }
       body.innerHTML = runs.map((run) => `
         <tr>
-          <td>${run.run_ts || '-'}</td>
-          <td>${run.status || '-'}</td>
-          <td>${run.processed_events ?? 0}</td>
-          <td>${run.processed_services ?? 0}</td>
-          <td>${run.duration_sec ?? 0}</td>
-          <td>${run.message || '-'}</td>
+          <td data-label="Data/hora">${run.run_ts || '-'}</td>
+          <td data-label="Status">${run.status || '-'}</td>
+          <td data-label="Eventos">${run.processed_events ?? 0}</td>
+          <td data-label="Cultos">${run.processed_services ?? 0}</td>
+          <td data-label="Duracao (s)">${run.duration_sec ?? 0}</td>
+          <td data-label="Mensagem">${run.message || '-'}</td>
         </tr>
       `).join('');
     }
@@ -1212,13 +1275,18 @@
           const msg = typeof d === 'string' ? d : (applyData.message || `HTTP ${applyRes.status}`);
           setText('reconcile-message', msg);
           setReconcileProgress(0);
+          showVipToast(msg, 'error', 8000);
           return;
         }
         setText('reconcile-message', applyData.message || 'Conciliacao aplicada a partir do browser.');
         setReconcileProgress(100);
+        showVipToast(applyData.message || 'Conciliacao aplicada no servidor.', 'success');
+        refreshLive();
       } catch (err) {
-        setText('reconcile-message', err && err.message ? err.message : 'Falha na conciliacao no browser');
+        const em = err && err.message ? err.message : 'Falha na conciliacao no browser';
+        setText('reconcile-message', em);
         setReconcileProgress(0);
+        showVipToast(em, 'error', 8000);
       } finally {
         if (btn) btn.disabled = false;
         if (serverBtn) serverBtn.disabled = false;
@@ -1234,9 +1302,15 @@
           const res = await fetch(vipUrl('api/reconciliation/run'), { method: 'POST' });
           const data = await res.json();
           setText('reconcile-message', data.message || 'Conciliacao iniciada');
+          if (res.ok && data.accepted !== false) {
+            showVipToast(data.message || 'Conciliacao iniciada no servidor.', 'info');
+          } else {
+            showVipToast(data.message || 'Nao foi possivel iniciar a conciliacao.', 'error', 7000);
+          }
           await refreshReconciliation();
         } catch (err) {
           setText('reconcile-message', 'Falha ao iniciar conciliacao');
+          showVipToast('Falha de rede ao iniciar conciliacao.', 'error');
         }
       });
     }
@@ -1302,6 +1376,7 @@
               ack.classList.add('err');
               ack.textContent = msg;
             }
+            showVipToast(msg, 'error', 7000);
             return;
           }
           const data = await res.json();
@@ -1314,11 +1389,13 @@
             ack.classList.remove('err');
             ack.textContent = `Ativo no servidor: ${applied}. O preview troca automaticamente em seguida.`;
           }
+          showVipToast(`Camera gravada: ${applied}`, 'success');
         } catch (e) {
           if (ack) {
             ack.classList.add('err');
             ack.textContent = 'Erro de rede ao gravar dispositivo.';
           }
+          showVipToast('Erro de rede ao gravar dispositivo.', 'error');
         }
       }
 
@@ -1388,10 +1465,10 @@
         }
         body.innerHTML = rows.map((p) => `
           <tr>
-            <td><code>${escHtml(p.person_id || '')}</code></td>
-            <td>${p.visit_days ?? '-'}</td>
-            <td>${escHtml(p.envolvimento ?? '')}</td>
-            <td>${escHtml(p.last_entrada ?? '')}</td>
+            <td data-label="person_id"><code>${escHtml(p.person_id || '')}</code></td>
+            <td data-label="Dias com entrada">${p.visit_days ?? '-'}</td>
+            <td data-label="Envolvimento">${escHtml(p.envolvimento ?? '')}</td>
+            <td data-label="Ultima entrada">${escHtml(p.last_entrada ?? '')}</td>
           </tr>
         `).join('');
       } catch (e) {
@@ -1401,6 +1478,7 @@
 
     document.getElementById('envolvimento-refresh')?.addEventListener('click', refreshEnvolvimento);
 
+    consumeUrlToast();
     bindCameraDevices();
     ensureCharts();
     refreshLive();

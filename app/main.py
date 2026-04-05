@@ -499,13 +499,14 @@ async def save_config_form(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     save_config(payload)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?toast=config_saved", status_code=303)
 
 
 @app.post("/cleanup/run")
 async def run_cleanup(dry_run: bool = Form(True)) -> RedirectResponse:
     execute_cleanup(dry_run=dry_run)
-    return RedirectResponse(url="/", status_code=303)
+    slug = "cleanup_dry" if dry_run else "cleanup_real"
+    return RedirectResponse(url=f"/?toast={slug}", status_code=303)
 
 
 @app.post("/schedules/create")
@@ -522,7 +523,7 @@ async def create_schedule_form(
         is_active=is_active is not None,
     )
     create_schedule(payload)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?toast=schedule_created", status_code=303)
 
 
 @app.post("/schedules/{schedule_id}/save")
@@ -540,10 +541,10 @@ async def update_schedule_form(
         is_active=is_active is not None,
     )
     update_schedule(schedule_id, payload)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?toast=schedule_updated", status_code=303)
 
 
 @app.post("/schedules/{schedule_id}/delete")
 async def delete_schedule_form(schedule_id: int) -> RedirectResponse:
     delete_schedule(schedule_id)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?toast=schedule_deleted", status_code=303)

@@ -60,7 +60,8 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
   - graficos de fluxo, ocupacao, faixa etaria e genero
 - Retencao e limpeza:
   - politicas configuraveis e execucao manual (dry-run/real)
-  - limpeza automatica diaria
+  - limpeza automatica diaria (remove apenas dados **mais velhos** que a janela; nao zera o dia)
+  - **Historico longo:** por defeito cada entrada/saida continua na tabela **`events`** por **180 dias** (`retencao_eventos_dias` no painel, ate 3650). Para ver tendencias em meses, exporte/reconcilie a partir de `events` ou Sheets; os totais do dashboard sao **do momento**, nao um arquivo diario automatico.
   - **Envolvimento:** janela em dias e minimo de dias com entrada para membro
     (painel: secao **Regras envolvimento** + resumo no dashboard + lista)
 - Conciliacao:
