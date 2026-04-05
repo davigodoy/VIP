@@ -1133,11 +1133,24 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
         return {"status": "error", "message": "Outra atualizacao ja esta em execucao."}
 
     repo = _repo_root()
-    # Always use the same interpreter as this process. Preferring repo/.venv broke
-    # installs when the service ran with system python3 but a stale or foreign .venv
-    # existed (e.g. copied from another machine/architecture).
-    python_exec = sys.executable
-    pip_exec_cmd = [python_exec, "-m", "pip", "install", "-r", "requirements.txt"]
+    # Igual ao update_raspi.sh: .venv local se existir e for executavel; senao pip no
+    # Python do processo com --break-system-packages (PEP 668 no Debian/Raspberry Pi OS).
+    venv_python = repo / ".venv" / "bin" / "python"
+    use_venv = venv_python.is_file() and os.access(venv_python, os.X_OK)
+    if use_venv:
+        python_exec = str(venv_python)
+        pip_exec_cmd = [python_exec, "-m", "pip", "install", "-r", "requirements.txt"]
+    else:
+        python_exec = sys.executable
+        pip_exec_cmd = [
+            python_exec,
+            "-m",
+            "pip",
+            "install",
+            "--break-system-packages",
+            "-r",
+            "requirements.txt",
+        ]
 
     git_info = _collect_git_update_info(refresh_remote=False)
     branch = str(git_info["branch"] or "").strip()
