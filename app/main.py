@@ -456,7 +456,8 @@ async def save_config_form(
     idade_limite_jovem: int = Form(...),
     idade_limite_adulto: int = Form(...),
     envolvimento_janela_dias: int = Form(...),
-    envolvimento_visitas_min_membro: int = Form(...),
+    envolvimento_max_dias_visitante: int = Form(...),
+    envolvimento_max_dias_frequentador: int = Form(...),
 ) -> RedirectResponse:
     try:
         payload = RetentionConfig(
@@ -494,7 +495,8 @@ async def save_config_form(
             idade_limite_jovem=idade_limite_jovem,
             idade_limite_adulto=idade_limite_adulto,
             envolvimento_janela_dias=envolvimento_janela_dias,
-            envolvimento_visitas_min_membro=envolvimento_visitas_min_membro,
+            envolvimento_max_dias_visitante=envolvimento_max_dias_visitante,
+            envolvimento_max_dias_frequentador=envolvimento_max_dias_frequentador,
         )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc

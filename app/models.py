@@ -45,12 +45,17 @@ class RetentionConfig(BaseModel):
     envolvimento_janela_dias: int = Field(
         ge=7,
         le=120,
-        description="Janela movel (ex.: 30) para contar dias com entrada.",
+        description="Janela movel (ex.: 30): todos os niveis contam dias com entrada neste periodo.",
     )
-    envolvimento_visitas_min_membro: int = Field(
+    envolvimento_max_dias_visitante: int = Field(
+        ge=1,
+        le=120,
+        description="Inclusive: ate este numero de dias distintos com entrada = visitante.",
+    )
+    envolvimento_max_dias_frequentador: int = Field(
         ge=2,
-        le=31,
-        description="Minimo de dias distintos com entrada na janela para classificar como membro/frequentador.",
+        le=120,
+        description="Inclusive: acima do limite de visitante ate este valor = frequentador; acima = membro.",
     )
 
     @model_validator(mode="after")
@@ -65,6 +70,10 @@ class RetentionConfig(BaseModel):
         if limits != sorted(limits) or len(set(limits)) != len(limits):
             raise ValueError(
                 "Limites de idade devem ser crescentes: crianca < junior < adolescente < jovem < adulto"
+            )
+        if self.envolvimento_max_dias_frequentador <= self.envolvimento_max_dias_visitante:
+            raise ValueError(
+                "Envolvimento: o limite de frequentador deve ser maior que o de visitante."
             )
         if (
             self.sync_credentials_source == "file"

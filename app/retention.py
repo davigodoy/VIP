@@ -54,10 +54,34 @@ def _to_bool(value: str) -> bool:
     return str(value).lower() in {"1", "true", "yes", "on"}
 
 
+def _legacy_envolvimento_tiers(raw: dict[str, Any]) -> tuple[int, int]:
+    """
+    Bases antigas so tinham envolvimento_visitas_min_membro.
+    Mapeia para (max_visitante, max_frequentador) preservando faixas:
+    visitante = 1 dia; frequentador = 2 .. min-1; membro >= min.
+    """
+    old_m = raw.get("envolvimento_visitas_min_membro")
+    try:
+        old_min = int(old_m) if old_m is not None and str(old_m).strip() != "" else 3
+    except ValueError:
+        old_min = 3
+    old_min = max(2, min(31, old_min))
+    return 1, max(1, old_min - 1)
+
+
 def load_config() -> RetentionConfig:
     with get_connection() as conn:
         rows = conn.execute("SELECT key, value FROM config").fetchall()
     raw = {row["key"]: row["value"] for row in rows}
+    v_key = str(raw.get("envolvimento_max_dias_visitante", "")).strip()
+    f_key = str(raw.get("envolvimento_max_dias_frequentador", "")).strip()
+    if not v_key or not f_key:
+        lv, lf = _legacy_envolvimento_tiers(raw)
+        raw = {
+            **raw,
+            "envolvimento_max_dias_visitante": v_key or str(lv),
+            "envolvimento_max_dias_frequentador": f_key or str(lf),
+        }
     default_cfg = RetentionConfig(
         retencao_temp_id_horas=6,
         retencao_profile_dias=90,
@@ -93,7 +117,8 @@ def load_config() -> RetentionConfig:
         idade_limite_jovem=24,
         idade_limite_adulto=59,
         envolvimento_janela_dias=30,
-        envolvimento_visitas_min_membro=3,
+        envolvimento_max_dias_visitante=2,
+        envolvimento_max_dias_frequentador=5,
     )
 
     def _raw_or_default(key: str) -> str:
@@ -149,8 +174,11 @@ def load_config() -> RetentionConfig:
         idade_limite_jovem=int(_raw_or_default("idade_limite_jovem")),
         idade_limite_adulto=int(_raw_or_default("idade_limite_adulto")),
         envolvimento_janela_dias=int(_raw_or_default("envolvimento_janela_dias")),
-        envolvimento_visitas_min_membro=int(
-            _raw_or_default("envolvimento_visitas_min_membro")
+        envolvimento_max_dias_visitante=int(
+            _raw_or_default("envolvimento_max_dias_visitante")
+        ),
+        envolvimento_max_dias_frequentador=int(
+            _raw_or_default("envolvimento_max_dias_frequentador")
         ),
     )
 
@@ -872,24 +900,32 @@ def run_reconciliation_job(run_id: str) -> dict[str, Any]:
         raise
 
 
-def involvement_band_for(visit_days: int, min_membro: int) -> str:
-    """Classifica por dias distintos com entrada na janela (min_membro >= 2)."""
-    if visit_days >= min_membro:
-        return "membro"
-    if visit_days == 1:
-        return "novo"
-    return "visitante"
+def involvement_band_for(visit_days: int, max_visitante: int, max_frequentador: int) -> str:
+    """Classifica por dias distintos com entrada na janela (limites inclusivos)."""
+    vd = int(visit_days)
+    mv = int(max_visitante)
+    mf = int(max_frequentador)
+    if mf <= mv:
+        mf = mv + 1
+    if vd <= mv:
+        return "visitante"
+    if vd <= mf:
+        return "frequentador"
+    return "membro"
 
 
-def _involvement_window_params() -> tuple[int, int, str]:
+def _involvement_window_params() -> tuple[int, int, int, str]:
     cfg = load_config()
     janela = max(7, min(120, int(cfg.envolvimento_janela_dias)))
-    min_membro = max(2, min(31, int(cfg.envolvimento_visitas_min_membro)))
-    return janela, min_membro, f"-{janela} days"
+    max_v = max(1, min(janela, int(cfg.envolvimento_max_dias_visitante)))
+    max_f = max(1, min(janela, int(cfg.envolvimento_max_dias_frequentador)))
+    if max_f <= max_v:
+        max_f = max_v + 1
+    return janela, max_v, max_f, f"-{janela} days"
 
 
 def _involvement_summary_and_total(
-    conn: sqlite3.Connection, mod: str, min_membro: int
+    conn: sqlite3.Connection, mod: str, max_visitante: int, max_frequentador: int
 ) -> tuple[dict[str, int], int]:
     total_row = conn.execute(
         f"""
@@ -905,9 +941,9 @@ def _involvement_summary_and_total(
         f"""
         SELECT env, COUNT(*) AS c FROM (
           SELECT CASE
-            WHEN vd >= ? THEN 'membro'
-            WHEN vd = 1 THEN 'novo'
-            ELSE 'visitante'
+            WHEN vd <= ? THEN 'visitante'
+            WHEN vd <= ? THEN 'frequentador'
+            ELSE 'membro'
           END AS env
           FROM (
             SELECT temp_id,
@@ -919,10 +955,10 @@ def _involvement_summary_and_total(
         )
         GROUP BY env
         """,
-        (min_membro, mod),
+        (max_visitante, max_frequentador, mod),
     ).fetchall()
 
-    summary = {"novo": 0, "visitante": 0, "membro": 0}
+    summary = {"visitante": 0, "frequentador": 0, "membro": 0}
     for sr in summary_rows:
         key = str(sr["env"])
         if key in summary:
@@ -932,12 +968,13 @@ def _involvement_summary_and_total(
 
 def fetch_involvement_summary_bundle() -> dict[str, Any]:
     """Resumo global (mesmas regras da lista de envolvimento). Sem cache."""
-    janela, min_membro, mod = _involvement_window_params()
+    janela, max_v, max_f, mod = _involvement_window_params()
     with get_connection() as conn:
-        summary, total = _involvement_summary_and_total(conn, mod, min_membro)
+        summary, total = _involvement_summary_and_total(conn, mod, max_v, max_f)
     return {
         "janela_dias": janela,
-        "visitas_min_para_membro": min_membro,
+        "max_dias_visitante": max_v,
+        "max_dias_frequentador": max_f,
         "summary": summary,
         "total_person_ids": total,
     }
@@ -964,9 +1001,9 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
     Lista person_id (temp_id) com entradas na janela movel; envolvimento derivado
     de dias distintos com pelo menos uma entrada (nao numero de cultos isolados).
     """
-    janela, min_membro, mod = _involvement_window_params()
+    janela, max_v, max_f, mod = _involvement_window_params()
     with get_connection() as conn:
-        summary, total = _involvement_summary_and_total(conn, mod, min_membro)
+        summary, total = _involvement_summary_and_total(conn, mod, max_v, max_f)
 
         rows = conn.execute(
             f"""
@@ -985,7 +1022,7 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
     people: list[dict[str, Any]] = []
     for r in rows:
         vd = int(r["visit_days"])
-        band = involvement_band_for(vd, min_membro)
+        band = involvement_band_for(vd, max_v, max_f)
         people.append(
             {
                 "person_id": r["person_id"],
@@ -997,15 +1034,18 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
 
     return {
         "janela_dias": janela,
-        "visitas_min_para_membro": min_membro,
+        "max_dias_visitante": max_v,
+        "max_dias_frequentador": max_f,
         "definicoes": {
-            "novo": "1 dia de calendario com pelo menos uma entrada na janela",
             "visitante": (
-                f"{2} a {min_membro - 1} dias distintos com entrada na janela"
-                if min_membro > 2
-                else "(nao aplicavel se min. para membro = 2)"
+                f"ate {max_v} dia(s) de calendario distinto(s) com entrada nos ultimos {janela} dias"
             ),
-            "membro": f"{min_membro} ou mais dias distintos com entrada na janela",
+            "frequentador": (
+                f"de {max_v + 1} a {max_f} dia(s) distintos com entrada nos ultimos {janela} dias"
+            ),
+            "membro": (
+                f"{max_f + 1} ou mais dia(s) distintos com entrada nos ultimos {janela} dias"
+            ),
         },
         "summary": summary,
         "total": total,

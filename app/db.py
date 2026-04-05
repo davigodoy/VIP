@@ -44,7 +44,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "idade_limite_jovem": 24,
     "idade_limite_adulto": 59,
     "envolvimento_janela_dias": 30,
-    "envolvimento_visitas_min_membro": 3,
+    "envolvimento_max_dias_visitante": 2,
+    "envolvimento_max_dias_frequentador": 5,
 }
 
 
@@ -573,4 +574,45 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     if "current_step" not in update_state_cols:
         conn.execute(
             "ALTER TABLE update_state ADD COLUMN current_step TEXT NOT NULL DEFAULT ''"
+        )
+
+    _migrate_envolvimento_tier_keys(conn)
+
+
+def _migrate_envolvimento_tier_keys(conn: sqlite3.Connection) -> None:
+    """Garante chaves dos 3 niveis (visitante / frequentador / membro); deriva de config legada se preciso."""
+    has_v = conn.execute(
+        "SELECT 1 FROM config WHERE key = 'envolvimento_max_dias_visitante' LIMIT 1"
+    ).fetchone()
+    has_f = conn.execute(
+        "SELECT 1 FROM config WHERE key = 'envolvimento_max_dias_frequentador' LIMIT 1"
+    ).fetchone()
+    if has_v and has_f:
+        return
+    row = conn.execute(
+        "SELECT value FROM config WHERE key = 'envolvimento_visitas_min_membro'"
+    ).fetchone()
+    try:
+        old_min = int(row["value"]) if row and row["value"] is not None else 3
+    except (TypeError, ValueError):
+        old_min = 3
+    old_min = max(2, min(31, old_min))
+    max_v, max_f = 1, max(1, old_min - 1)
+    if not has_v:
+        conn.execute(
+            """
+            INSERT INTO config (key, value, updated_at)
+            VALUES ('envolvimento_max_dias_visitante', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO NOTHING
+            """,
+            (str(max_v),),
+        )
+    if not has_f:
+        conn.execute(
+            """
+            INSERT INTO config (key, value, updated_at)
+            VALUES ('envolvimento_max_dias_frequentador', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO NOTHING
+            """,
+            (str(max_f),),
         )

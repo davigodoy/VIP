@@ -21,10 +21,10 @@ Escopo funcional:
 - sincronizacao opcional com Google Sheets
 - reconciliacao manual (no Pi ou a posteriori noutro equipamento) para recomputar
   metricas a partir dos **eventos brutos** guardados na tabela `events`
-- **Envolvimento** (novo / visitante / membro): dias de calendario distintos com
-  entrada numa janela movel (ex. 30 dias), com limiar configuravel para
-  **membro**; requer `person_id` estavel entre visitas (edge). Ver
-  `GET /api/people/involvement`
+- **Envolvimento** (visitante / frequentador / membro): dias de calendario distintos com
+  entrada numa janela movel (ex. 30 dias); **visitante** ate N dias distintos,
+  **frequentador** ate M (M > N), acima disso **membro**; N e M configuraveis no painel.
+  Requer `person_id` estavel entre visitas (edge). Ver `GET /api/people/involvement`
 
 ## Conferencia com o rascunho de objetivos (igreja / Pi 4)
 
@@ -45,7 +45,7 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
 | Horarios / picos de entrada | Sim: graficos de fluxo e ocupacao (janela configuravel) |
 | Conciliacao pelo navegador (outro PC/Mac) | Sim: `GET .../events` + `POST .../apply` + botoes no painel |
 | Privacidade: sem nome, IDs tecnicos | Sim: `person_id` / track, sem cadastro nominal no fluxo padrao |
-| Categorizar frequencia (novo / visitante / membro) | Sim: **Regras envolvimento** + dashboard + lista; depende de `person_id` **estavel** (edge) |
+| Categorizar frequencia (visitante / frequentador / membro) | Sim: **Regras envolvimento** (janela + dois limites de dias distintos) + dashboard + lista; depende de `person_id` **estavel** (edge) |
 
 ## Funcionalidades principais
 
@@ -62,8 +62,9 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
   - politicas configuraveis e execucao manual (dry-run/real)
   - limpeza automatica diaria (remove apenas dados **mais velhos** que a janela; nao zera o dia)
   - **Historico longo:** por defeito cada entrada/saida continua na tabela **`events`** por **180 dias** (`retencao_eventos_dias` no painel, ate 3650). Para ver tendencias em meses, exporte/reconcilie a partir de `events` ou Sheets; os totais do dashboard sao **do momento**, nao um arquivo diario automatico.
-  - **Envolvimento:** janela em dias e minimo de dias com entrada para membro
-    (painel: secao **Regras envolvimento** + resumo no dashboard + lista)
+  - **Envolvimento:** janela em dias + limite maximo de dias distintos para visitante
+    e para frequentador (membro = acima do segundo limite); painel **Regras envolvimento**,
+    resumo no dashboard e lista
 - Conciliacao:
   - execucao sob demanda no painel (servidor ou browser), com progresso e historico
   - **Fonte para conciliar mais tarde:** cada `ingest` grava ja em `events` o necessario
@@ -232,7 +233,7 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
     - resposta inclui `culto_id: null` no evento, mais `report_culto_id`, `scheduled` e `service_name` para UI / relatorios
 
 - `GET /api/people/involvement` — `person_id` com entrada na janela; campos
-  `visit_days`, `envolvimento` (`novo` | `visitante` | `membro`), `last_entrada`;
+  `visit_days`, `envolvimento` (`visitante` | `frequentador` | `membro`), `last_entrada`;
   query `limit`, `offset`. Regras e `nota_identidade` no JSON.
 
 - `GET /api/metrics/live` — agregados da particao escolhida: sem query `culto_id`, usa o culto **atual na agenda** se `scheduled`, senao `__global__`. Query `culto_id` forca uma particao. Inclui `involvement` (global). `culto_id` no JSON e `null` quando a particao e o agregado global.
