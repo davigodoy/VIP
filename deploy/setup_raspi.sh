@@ -248,17 +248,20 @@ enable_service() {
 
 apply_initial_camera_config() {
   echo "[6/6] Aplicando configuracao inicial da camera..."
-  VIP_INSTALL_DIR="$INSTALL_DIR" \
-  VIP_CAMERA_DEVICE="$CAMERA_DEVICE" \
-  VIP_CAMERA_LABEL="$CAMERA_LABEL" \
-  VIP_CAMERA_ENABLED="$CAMERA_ENABLED" \
-  VIP_CAMERA_WIDTH="$CAMERA_WIDTH" \
-  VIP_CAMERA_HEIGHT="$CAMERA_HEIGHT" \
-  VIP_CAMERA_FPS="$CAMERA_FPS" \
-  VIP_CULTO_ANTECEDENCIA_MIN="$CULTO_ANTECEDENCIA_MIN" \
-  VIP_CULTO_DURACAO_MIN="$CULTO_DURACAO_MIN" \
-  VIP_ESTIMAR_FAIXA_ETARIA="$ESTIMAR_FAIXA_ETARIA" \
-  sudo -u "$RUN_USER" "$PYTHON_BIN" - <<'PY'
+  # sudo strips the caller environment by default; env forwards these to Python.
+  sudo -u "$RUN_USER" \
+    env \
+      VIP_INSTALL_DIR="$INSTALL_DIR" \
+      VIP_CAMERA_DEVICE="$CAMERA_DEVICE" \
+      VIP_CAMERA_LABEL="$CAMERA_LABEL" \
+      VIP_CAMERA_ENABLED="$CAMERA_ENABLED" \
+      VIP_CAMERA_WIDTH="$CAMERA_WIDTH" \
+      VIP_CAMERA_HEIGHT="$CAMERA_HEIGHT" \
+      VIP_CAMERA_FPS="$CAMERA_FPS" \
+      VIP_CULTO_ANTECEDENCIA_MIN="$CULTO_ANTECEDENCIA_MIN" \
+      VIP_CULTO_DURACAO_MIN="$CULTO_DURACAO_MIN" \
+      VIP_ESTIMAR_FAIXA_ETARIA="$ESTIMAR_FAIXA_ETARIA" \
+    "$PYTHON_BIN" - <<'PY'
 import os
 import sqlite3
 from pathlib import Path
