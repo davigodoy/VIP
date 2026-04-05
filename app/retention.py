@@ -201,6 +201,25 @@ def save_config(payload: RetentionConfig) -> None:
     invalidate_involvement_summary_cache()
 
 
+def update_involvement_rules(
+    *,
+    envolvimento_janela_dias: int,
+    envolvimento_max_dias_visitante: int,
+    envolvimento_max_dias_frequentador: int,
+) -> RetentionConfig:
+    """Atualiza so as tres chaves de envolvimento; revalida RetentionConfig completo."""
+    cur = load_config()
+    updated = cur.model_copy(
+        update={
+            "envolvimento_janela_dias": envolvimento_janela_dias,
+            "envolvimento_max_dias_visitante": envolvimento_max_dias_visitante,
+            "envolvimento_max_dias_frequentador": envolvimento_max_dias_frequentador,
+        }
+    )
+    save_config(updated)
+    return updated
+
+
 def apply_camera_device(device: str) -> RetentionConfig:
     cfg = load_config()
     updated = cfg.model_copy(update={"camera_device": device.strip()})
@@ -2073,24 +2092,45 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
     partition = _resolve_live_partition_id(culto_id, display)
     cam_det = _camera_detection_status()
     stats_scope = "culto" if partition != GLOBAL_STATS_ID else "global"
+    global_stats_fallback = False
 
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM service_event_stats WHERE culto_id = ?",
             (partition,),
         ).fetchone()
+        # Eventos fora da janela do culto na agenda so incrementam __global__; dentro
+        # da janela o painel pedia a particao do culto e via linha inexistente -> zeros.
+        if row is None and partition != GLOBAL_STATS_ID:
+            row = conn.execute(
+                "SELECT * FROM service_event_stats WHERE culto_id = ?",
+                (GLOBAL_STATS_ID,),
+            ).fetchone()
+            if row is not None:
+                global_stats_fallback = True
+                stats_scope = "global"
 
     involvement = get_involvement_summary_for_live_metrics()
 
+    culto_id_out: str | None = None
+    if partition != GLOBAL_STATS_ID and not global_stats_fallback:
+        culto_id_out = partition
+
+    base = {
+        "active": True,
+        "culto_id": culto_id_out,
+        "stats_scope": stats_scope,
+        "global_stats_fallback": global_stats_fallback,
+        "camera_detection": cam_det,
+        "report_culto_id": display["report_culto_id"],
+        "service_name": display["service_name"],
+        "scheduled": display["scheduled"],
+        "involvement": involvement,
+    }
+
     if row is None:
         return {
-            "active": True,
-            "culto_id": None if partition == GLOBAL_STATS_ID else partition,
-            "stats_scope": stats_scope,
-            "camera_detection": cam_det,
-            "report_culto_id": display["report_culto_id"],
-            "service_name": display["service_name"],
-            "scheduled": display["scheduled"],
+            **base,
             "entries_count": 0,
             "exits_count": 0,
             "returns_count": 0,
@@ -2109,17 +2149,10 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
                 "homem": 0,
                 "mulher": 0,
             },
-            "involvement": involvement,
         }
 
     return {
-        "active": True,
-        "culto_id": None if partition == GLOBAL_STATS_ID else partition,
-        "stats_scope": stats_scope,
-        "camera_detection": cam_det,
-        "report_culto_id": display["report_culto_id"],
-        "service_name": display["service_name"],
-        "scheduled": display["scheduled"],
+        **base,
         "entries_count": int(row["entries_count"]),
         "exits_count": int(row["exits_count"]),
         "returns_count": int(row["returns_count"]),
@@ -2138,7 +2171,6 @@ def get_live_metrics(culto_id: str | None = None) -> dict[str, Any]:
             "homem": int(row["homem_count"]),
             "mulher": int(row["mulher_count"]),
         },
-        "involvement": involvement,
     }
 
 
@@ -2152,6 +2184,9 @@ def get_dashboard_charts(
     display = agenda_display_context(now)
     partition = _resolve_live_partition_id(culto_id, display)
     live = get_live_metrics(culto_id=culto_id)
+    chart_partition = (
+        GLOBAL_STATS_ID if live.get("global_stats_fallback") else partition
+    )
     if not live.get("active"):
         return {
             "active": False,
@@ -2187,12 +2222,12 @@ def get_dashboard_charts(
             """,
             (f"-{safe_window} minutes",),
         ).fetchall()
-    if partition != GLOBAL_STATS_ID:
+    if chart_partition != GLOBAL_STATS_ID:
         rows = [
             r
             for r in rows
             if derive_report_culto_id_for_event_ts(str(r["event_ts"])).strip()
-            == partition
+            == chart_partition
         ]
 
     if not rows:

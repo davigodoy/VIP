@@ -266,6 +266,13 @@
             <label>Visitante — ate quantos dias distintos com entrada?<input type="number" name="envolvimento_max_dias_visitante" min="1" max="120" value="{{ config.envolvimento_max_dias_visitante }}" required title="Inclusive: 1 ate este valor = visitante" /></label>
             <label>Frequentador — ate quantos dias distintos com entrada?<input type="number" name="envolvimento_max_dias_frequentador" min="2" max="120" value="{{ config.envolvimento_max_dias_frequentador }}" required title="Inclusive: acima do limite de visitante ate este valor = frequentador; acima = membro. Deve ser maior que o campo visitante." /></label>
           </div>
+          <p class="help" style="margin-top:10px;">
+            <strong>Salvar regras</strong> grava apenas este bloco pela API (sem recarregar a pagina) e atualiza o dashboard e a lista abaixo.
+            O botao <strong>Salvar configuracao</strong> no fim do formulario grava <em>toda</em> a configuracao (camera, retencao, etc.), incluindo estes tres valores.
+          </p>
+          <div class="actions">
+            <button type="button" id="save-envolvimento-config">Salvar regras de envolvimento</button>
+          </div>
         </section>
 
         <section id="sec-config-retencao" class="card">
@@ -296,10 +303,10 @@
         <h2>Lista de envolvimento (visitante / frequentador / membro)</h2>
         <p class="help">
           Com base nas <strong>entradas</strong> gravadas: <strong>dias de calendario distintos</strong> com pelo menos uma entrada nos ultimos
-          <strong>{{ config.envolvimento_janela_dias }}</strong> dias.
-          <strong>Visitante:</strong> ate {{ config.envolvimento_max_dias_visitante }} dia(s) distinto(s);
-          <strong>frequentador:</strong> {{ config.envolvimento_max_dias_visitante + 1 }} a {{ config.envolvimento_max_dias_frequentador }};
-          <strong>membro:</strong> {{ config.envolvimento_max_dias_frequentador + 1 }} ou mais.
+          <strong id="involvement-list-janela">{{ config.envolvimento_janela_dias }}</strong> dias.
+          <strong>Visitante:</strong> ate <strong id="involvement-list-max-v">{{ config.envolvimento_max_dias_visitante }}</strong> dia(s) distinto(s);
+          <strong>frequentador:</strong> <strong id="involvement-list-freq-from">{{ config.envolvimento_max_dias_visitante + 1 }}</strong> a <strong id="involvement-list-max-f">{{ config.envolvimento_max_dias_frequentador }}</strong>;
+          <strong>membro:</strong> <strong id="involvement-list-membro-from">{{ config.envolvimento_max_dias_frequentador + 1 }}</strong> ou mais.
           Ajuste em <a href="#sec-config-envolvimento">Regras envolvimento</a>.
         </p>
         <p class="help warn" id="envolvimento-nota"></p>
@@ -781,12 +788,15 @@
         }
         if (liveCard) liveCard.classList.remove('live-offline');
         const scope = data.stats_scope === 'culto' ? 'totais do culto na agenda' : 'totais globais';
-        setText(
-          'live-status',
-          data.scheduled === false
-            ? `Online — ${scope} (fora da janela na agenda; deteccao HOG nao depende disso)`
-            : `Online — ${scope}`
-        );
+        let statusMsg;
+        if (data.scheduled === false) {
+          statusMsg = `Online — ${scope} (fora da janela na agenda; deteccao HOG nao depende disso)`;
+        } else if (data.global_stats_fallback === true) {
+          statusMsg = `Online — ${scope} — particao do culto na agenda ainda sem agregados; a mostrar totais globais (ex.: entradas fora do horario na agenda).`;
+        } else {
+          statusMsg = `Online — ${scope}`;
+        }
+        setText('live-status', statusMsg);
         const detHint = document.getElementById('live-detection-hint');
         if (detHint && data.camera_detection) {
           const cd = data.camera_detection;
@@ -1491,6 +1501,86 @@
         .replace(/"/g, '&quot;');
     }
 
+    function formatVip422Detail(detail) {
+      if (detail == null || detail === '') return 'Dados invalidos.';
+      if (typeof detail === 'string') return detail;
+      if (Array.isArray(detail)) {
+        const parts = detail
+          .map((d) => {
+            if (typeof d === 'string') return d;
+            if (d && typeof d.msg === 'string') return d.msg;
+            return '';
+          })
+          .filter(Boolean);
+        return parts.length ? parts.join(' ') : 'Dados invalidos.';
+      }
+      return String(detail);
+    }
+
+    function applyInvolvementRulesToDom(janela, maxV, maxF) {
+      const j = Number(janela);
+      const v = Number(maxV);
+      const f = Number(maxF);
+      if (Number.isNaN(j) || Number.isNaN(v) || Number.isNaN(f)) return;
+      setText('involvement-dash-janela', j);
+      setText('involvement-dash-max-v', v);
+      setText('involvement-dash-max-f', f);
+      setText('involvement-list-janela', j);
+      setText('involvement-list-max-v', v);
+      setText('involvement-list-freq-from', v + 1);
+      setText('involvement-list-max-f', f);
+      setText('involvement-list-membro-from', f + 1);
+    }
+
+    async function saveInvolvementConfig() {
+      const btn = document.getElementById('save-envolvimento-config');
+      const root = document.getElementById('sec-config-envolvimento');
+      if (!root || !btn) return;
+      const q = (name) => root.querySelector(`[name="${name}"]`);
+      const n1 = q('envolvimento_janela_dias');
+      const n2 = q('envolvimento_max_dias_visitante');
+      const n3 = q('envolvimento_max_dias_frequentador');
+      if (!n1 || !n2 || !n3) return;
+      const body = {
+        envolvimento_janela_dias: Number(n1.value),
+        envolvimento_max_dias_visitante: Number(n2.value),
+        envolvimento_max_dias_frequentador: Number(n3.value),
+      };
+      if (Object.values(body).some((x) => Number.isNaN(x))) {
+        showVipToast('Preencha os tres valores com numeros validos.', 'error');
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await fetch(vipUrl('api/config/involvement'), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error');
+          return;
+        }
+        if (data.ok) {
+          applyInvolvementRulesToDom(
+            data.envolvimento_janela_dias,
+            data.envolvimento_max_dias_visitante,
+            data.envolvimento_max_dias_frequentador,
+          );
+          showVipToast('Regras de envolvimento gravadas.', 'success');
+          refreshLive();
+          refreshEnvolvimento();
+        } else {
+          showVipToast('Resposta inesperada do servidor.', 'error');
+        }
+      } catch (e) {
+        showVipToast('Falha de rede ao gravar.', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     async function refreshEnvolvimento() {
       const body = document.getElementById('envolvimento-body');
       const resumo = document.getElementById('envolvimento-resumo');
@@ -1528,6 +1618,7 @@
     }
 
     document.getElementById('envolvimento-refresh')?.addEventListener('click', refreshEnvolvimento);
+    document.getElementById('save-envolvimento-config')?.addEventListener('click', saveInvolvementConfig);
 
     consumeUrlToast();
     bindCameraDevices();

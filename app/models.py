@@ -92,6 +92,22 @@ class RetentionConfig(BaseModel):
         return self
 
 
+class InvolvementRulesUpdate(BaseModel):
+    """Corpo JSON para gravar apenas as regras de envolvimento (sem o restante da configuracao)."""
+
+    envolvimento_janela_dias: int = Field(ge=7, le=120)
+    envolvimento_max_dias_visitante: int = Field(ge=1, le=120)
+    envolvimento_max_dias_frequentador: int = Field(ge=2, le=120)
+
+    @model_validator(mode="after")
+    def validate_tiers(self) -> "InvolvementRulesUpdate":
+        if self.envolvimento_max_dias_frequentador <= self.envolvimento_max_dias_visitante:
+            raise ValueError(
+                "Envolvimento: o limite de frequentador deve ser maior que o de visitante."
+            )
+        return self
+
+
 class CameraDeviceSelect(BaseModel):
     """Atualiza so o dispositivo V4L2/indice usado pelo preview e pela configuracao."""
 

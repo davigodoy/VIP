@@ -236,9 +236,11 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
   `visit_days`, `envolvimento` (`visitante` | `frequentador` | `membro`), `last_entrada`;
   query `limit`, `offset`. Regras e `nota_identidade` no JSON.
 
-- `GET /api/metrics/live` — agregados da particao escolhida: sem query `culto_id`, usa o culto **atual na agenda** se `scheduled`, senao `__global__`. Query `culto_id` forca uma particao. Inclui `involvement` (global). `culto_id` no JSON e `null` quando a particao e o agregado global.
+- `PATCH /api/config/involvement` — JSON com `envolvimento_janela_dias`, `envolvimento_max_dias_visitante`, `envolvimento_max_dias_frequentador`; grava so essas chaves (o painel usa isto no botao **Salvar regras de envolvimento** sem recarregar a pagina).
 
-- `GET /api/metrics/charts` — eventos na janela de tempo; mesma regra de particao que `live` (para um culto, filtra linhas cuja derivacao agenda+`event_ts` coincide com a particao). Queries `window_minutes`, `bucket_seconds`, `culto_id` opcionais.
+- `GET /api/metrics/live` — agregados da particao escolhida: sem query `culto_id`, usa o culto **atual na agenda** se `scheduled`, senao `__global__`. Query `culto_id` forca uma particao. Inclui `involvement` (global). `culto_id` no JSON e `null` quando a particao e o agregado global. Se a particao do culto **nao tiver linha** em `service_event_stats` (comum quando houve entradas so em `__global__`, ex. fora do horario na agenda), a API devolve os totais de `__global__` com `global_stats_fallback: true` e `stats_scope: "global"` para o painel nao mostrar zeros em cima com envolvimento preenchido.
+
+- `GET /api/metrics/charts` — eventos na janela de tempo; mesma regra de particao que `live` (para um culto, filtra linhas cuja derivacao agenda+`event_ts` coincide com a particao). Quando `live` usa `global_stats_fallback`, os graficos **nao** filtram por culto na mesma janela (alinhados aos totais globais mostrados). Queries `window_minutes`, `bucket_seconds`, `culto_id` opcionais.
 
 **Atualizacao de banco:** na primeira subida apos esta versao, uma migracao pode esvaziar `service_event_stats` e `service_event_people` e ajustar o schema; rode `POST /api/reconciliation/run` uma vez para recomputar a partir de `events`.
 

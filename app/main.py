@@ -23,6 +23,7 @@ from .db import init_db
 from .models import (
     CameraDeviceSelect,
     EventIngestRequest,
+    InvolvementRulesUpdate,
     ReconciliationApplyRequest,
     RetentionConfig,
     ServiceScheduleCreate,
@@ -55,6 +56,7 @@ from .retention import (
     run_system_update_job,
     save_config,
     systemd_status,
+    update_involvement_rules,
     update_schedule,
 )
 from .camera_devices import list_detected_cameras
@@ -502,6 +504,32 @@ async def save_config_form(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     save_config(payload)
     return RedirectResponse(url="/?toast=config_saved", status_code=303)
+
+
+@app.patch("/api/config/involvement")
+async def api_patch_involvement_rules(body: InvolvementRulesUpdate) -> JSONResponse:
+    """Grava apenas janela e limites de envolvimento (sem recarregar o formulario completo)."""
+
+    def _run() -> RetentionConfig:
+        return update_involvement_rules(
+            envolvimento_janela_dias=body.envolvimento_janela_dias,
+            envolvimento_max_dias_visitante=body.envolvimento_max_dias_visitante,
+            envolvimento_max_dias_frequentador=body.envolvimento_max_dias_frequentador,
+        )
+
+    try:
+        cfg = await asyncio.to_thread(_run)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    return JSONResponse(
+        content={
+            "ok": True,
+            "envolvimento_janela_dias": cfg.envolvimento_janela_dias,
+            "envolvimento_max_dias_visitante": cfg.envolvimento_max_dias_visitante,
+            "envolvimento_max_dias_frequentador": cfg.envolvimento_max_dias_frequentador,
+        }
+    )
 
 
 @app.post("/cleanup/run")
