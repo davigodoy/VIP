@@ -1,6 +1,10 @@
 """
 Deteccao continua de pessoas (OpenCV HOG) no mesmo fluxo da camera que o preview.
 Gera entradas/saidas via ingest_event — independente do browser aberto.
+
+Nota: cada perda de track gera novo `hog_*` e conta como pessoa unica nova.
+Emparelhamento por IoU + distancia reduz troca de id, mas **unicos HOG != pessoas
+reais** (use edge com track estavel para identidade seria).
 """
 from __future__ import annotations
 
@@ -34,9 +38,11 @@ _next_tid = 1
 _last_cfg_off = True
 
 # Distancia maxima (pixels no frame redimensionado) para manter o mesmo track
-_MATCH_DIST = 100.0
-# Frames sem deteccao antes de contar saida (com ~8 FPS ~3s — reduz saidas por flicker do HOG)
-_MAX_MISSES = 26
+_MATCH_DIST = 130.0
+# Sobreposicao minima (IoU) para considerar a mesma pessoa quando o centro salta
+_MIN_IOU_MATCH = 0.08
+# Frames sem deteccao antes de contar saida (com ~8 FPS ~4s — reduz saidas por flicker do HOG)
+_MAX_MISSES = 32
 # Largura maxima do lado maior ao correr HOG (velocidade no Pi)
 _DETECT_MAX_SIDE = 520
 # > 0 reduz falsos positivos (0.0 aceita quase tudo). Subir se ainda houver fantasmas.
@@ -51,6 +57,23 @@ _HOG_MIN_AR = 1.15
 _HOG_MAX_AR = 4.2
 # Fundir deteccoes sobrepostas (mesma pessoa, varias caixas)
 _HOG_GROUP_EPS = 0.35
+
+
+def _iou_xywh(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    """IoU entre retangulos (x, y, w, h) no mesmo espaco de coordenadas."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    x0 = max(ax, bx)
+    y0 = max(ay, by)
+    x1 = min(ax + aw, bx + bw)
+    y1 = min(ay + ah, by + bh)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    inter = (x1 - x0) * (y1 - y0)
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 0.0 else 0.0
 
 
 def _get_hog() -> Any | None:
@@ -143,21 +166,59 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     to_enter: list[int] = []
     enter_rect_small: dict[int, tuple[float, float, float, float]] = {}
     with _state_lock:
-        used: set[int] = set()
-        for tid in list(_tracks.keys()):
+        track_ids = list(_tracks.keys())
+        used_j: set[int] = set()
+        match_tid_to_j: dict[int, int] = {}
+
+        scored: list[tuple[float, float, int, int]] = []
+        for tid in track_ids:
             tr = _tracks[tid]
+            prev = tr.get("rect_small")
+            if prev is None:
+                continue
+            for j, det in enumerate(detections):
+                drect = (det[3], det[4], det[5], det[6])
+                iou = _iou_xywh(prev, drect)
+                dcent = math.hypot(det[0] - tr["cx"], det[1] - tr["cy"])
+                scored.append((iou, dcent, tid, j))
+        scored.sort(key=lambda t: (-t[0], t[1]))
+
+        matched_tid: set[int] = set()
+        for iou, _dcent, tid, j in scored:
+            if iou < _MIN_IOU_MATCH:
+                break
+            if tid in matched_tid or j in used_j:
+                continue
+            matched_tid.add(tid)
+            used_j.add(j)
+            match_tid_to_j[tid] = j
+
+        for tid in track_ids:
+            if tid in match_tid_to_j:
+                continue
+            tr = _tracks.get(tid)
+            if tr is None:
+                continue
             best_i: int | None = None
             best_d = _MATCH_DIST + 1.0
-            for i, (cx, cy, *_rest) in enumerate(detections):
-                if i in used:
+            for j, det in enumerate(detections):
+                if j in used_j:
                     continue
-                d = math.hypot(cx - tr["cx"], cy - tr["cy"])
+                d = math.hypot(det[0] - tr["cx"], det[1] - tr["cy"])
                 if d < best_d:
                     best_d = d
-                    best_i = i
+                    best_i = j
             if best_i is not None and best_d <= _MATCH_DIST:
-                used.add(best_i)
-                cx, cy, sz, xs, ys, rws, rhs = detections[best_i]
+                used_j.add(best_i)
+                match_tid_to_j[tid] = best_i
+
+        for tid in track_ids:
+            tr = _tracks.get(tid)
+            if tr is None:
+                continue
+            if tid in match_tid_to_j:
+                j = match_tid_to_j[tid]
+                cx, cy, sz, xs, ys, rws, rhs = detections[j]
                 tr["cx"], tr["cy"], tr["sz"] = cx, cy, sz
                 tr["rect_small"] = (xs, ys, rws, rhs)
                 tr["misses"] = 0
@@ -168,7 +229,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                     to_exit.append(tid)
 
         for i, (cx, cy, sz, xs, ys, rws, rhs) in enumerate(detections):
-            if i in used:
+            if i in used_j:
                 continue
             tid = _next_tid
             _next_tid += 1
