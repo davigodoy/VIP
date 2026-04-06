@@ -15,6 +15,7 @@ DEFAULT_CAMERA_FPS="8"
 DEFAULT_CULTO_ANTECEDENCIA_MIN="30"
 DEFAULT_CULTO_DURACAO_MIN="150"
 DEFAULT_ESTIMAR_FAIXA_ETARIA="1"
+DEFAULT_ESTIMAR_GENERO="1"
 
 INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 RUN_USER="${RUN_USER:-$DEFAULT_USER}"
@@ -29,6 +30,7 @@ CAMERA_ENABLED="${CAMERA_ENABLED:-1}"
 CULTO_ANTECEDENCIA_MIN="${CULTO_ANTECEDENCIA_MIN:-$DEFAULT_CULTO_ANTECEDENCIA_MIN}"
 CULTO_DURACAO_MIN="${CULTO_DURACAO_MIN:-$DEFAULT_CULTO_DURACAO_MIN}"
 ESTIMAR_FAIXA_ETARIA="${ESTIMAR_FAIXA_ETARIA:-$DEFAULT_ESTIMAR_FAIXA_ETARIA}"
+ESTIMAR_GENERO="${ESTIMAR_GENERO:-$DEFAULT_ESTIMAR_GENERO}"
 NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +55,7 @@ Opcoes:
   --culto-antecedencia-min N Janela de inicio do culto (min antes, padrao: $DEFAULT_CULTO_ANTECEDENCIA_MIN)
   --culto-duracao-min N     Duracao da janela do culto (min, padrao: $DEFAULT_CULTO_DURACAO_MIN)
   --estimar-faixa-etaria 0|1 Habilita estimativa de faixas etarias (padrao: $DEFAULT_ESTIMAR_FAIXA_ETARIA)
+  --estimar-genero 0|1      Habilita estimativa de genero (padrao: $DEFAULT_ESTIMAR_GENERO)
   --skip-system-deps        Nao roda apt-get update/install
   --yes                     Nao perguntar confirmacoes
   --help                    Exibe esta ajuda
@@ -118,6 +121,10 @@ while [[ $# -gt 0 ]]; do
       ESTIMAR_FAIXA_ETARIA="$2"
       shift 2
       ;;
+    --estimar-genero)
+      ESTIMAR_GENERO="$2"
+      shift 2
+      ;;
     --skip-system-deps)
       SKIP_SYSTEM_DEPS=1
       shift
@@ -161,6 +168,7 @@ confirm_or_exit() {
   echo "  culto_antecedencia_min: $CULTO_ANTECEDENCIA_MIN"
   echo "  culto_duracao_min: $CULTO_DURACAO_MIN"
   echo "  estimar_faixa_etaria: $ESTIMAR_FAIXA_ETARIA"
+  echo "  estimar_genero: $ESTIMAR_GENERO"
   read -r -p "Continuar? [y/N] " answer
   if [[ ! "$answer" =~ ^[Yy]$ ]]; then
     echo "Cancelado."
@@ -273,6 +281,7 @@ apply_initial_camera_config() {
       VIP_CULTO_ANTECEDENCIA_MIN="$CULTO_ANTECEDENCIA_MIN" \
       VIP_CULTO_DURACAO_MIN="$CULTO_DURACAO_MIN" \
       VIP_ESTIMAR_FAIXA_ETARIA="$ESTIMAR_FAIXA_ETARIA" \
+      VIP_ESTIMAR_GENERO="$ESTIMAR_GENERO" \
     "$PYTHON_BIN" - <<'PY'
 import os
 import sqlite3
@@ -292,6 +301,7 @@ updates = {
     "culto_antecedencia_min": os.environ["VIP_CULTO_ANTECEDENCIA_MIN"],
     "culto_duracao_min": os.environ["VIP_CULTO_DURACAO_MIN"],
     "estimar_faixa_etaria": os.environ["VIP_ESTIMAR_FAIXA_ETARIA"],
+    "estimar_genero": os.environ["VIP_ESTIMAR_GENERO"],
 }
 for key, value in updates.items():
     conn.execute(

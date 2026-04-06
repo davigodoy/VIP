@@ -230,11 +230,12 @@ def apply_camera_device(device: str) -> RetentionConfig:
 def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
     config = load_config()
     now = datetime.now(UTC)
+    event_cutoff_mod = f"-{config.retencao_eventos_dias} days"
 
     policies = {
         "temp_tracks": f"datetime('now', '-{config.retencao_temp_id_horas} hours')",
         "profiles": f"datetime('now', '-{config.retencao_profile_dias} days')",
-        "events": f"datetime('now', '-{config.retencao_eventos_dias} days')",
+            "events": f"datetime('now', '{event_cutoff_mod}')",
         "aggregated_metrics": f"datetime('now', '-{config.retencao_agregados_meses} months')",
         "snapshots": f"datetime('now', '-{config.retencao_imagens_horas} hours')",
     }
@@ -248,7 +249,13 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
                 f"SELECT COUNT(*) AS c FROM profiles WHERE last_seen < {policies['profiles']}"
             ).fetchone()["c"],
             "events": conn.execute(
-                f"SELECT COUNT(*) AS c FROM events WHERE event_ts < {policies['events']}"
+                """
+                SELECT COUNT(*) AS c
+                FROM events
+                WHERE julianday(event_ts) IS NOT NULL
+                  AND julianday(event_ts) < julianday('now', ?)
+                """,
+                (event_cutoff_mod,),
             ).fetchone()["c"],
             "aggregated_metrics": conn.execute(
                 f"SELECT COUNT(*) AS c FROM aggregated_metrics WHERE service_started_at < {policies['aggregated_metrics']}"
@@ -263,7 +270,14 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
                 f"DELETE FROM temp_tracks WHERE created_at < {policies['temp_tracks']}"
             )
             conn.execute(f"DELETE FROM profiles WHERE last_seen < {policies['profiles']}")
-            conn.execute(f"DELETE FROM events WHERE event_ts < {policies['events']}")
+            conn.execute(
+                """
+                DELETE FROM events
+                WHERE julianday(event_ts) IS NOT NULL
+                  AND julianday(event_ts) < julianday('now', ?)
+                """,
+                (event_cutoff_mod,),
+            )
             conn.execute(
                 f"DELETE FROM aggregated_metrics WHERE service_started_at < {policies['aggregated_metrics']}"
             )
@@ -2492,8 +2506,8 @@ def get_dashboard_charts(
             """
             SELECT event_type, event_ts
             FROM events
-            WHERE event_ts >= datetime('now', ?)
-            ORDER BY event_ts ASC, id ASC
+            WHERE julianday(event_ts) >= julianday('now', ?)
+            ORDER BY julianday(event_ts) ASC, id ASC
             """,
             (f"-{safe_window} minutes",),
         ).fetchall()

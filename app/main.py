@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from .db import init_db
+from .db import get_connection, init_db
 from .models import (
     CameraDeviceSelect,
     EventIngestRequest,
@@ -170,6 +170,44 @@ async def dashboard(request: Request) -> HTMLResponse:
             "weekday_labels": WEEKDAY_LABELS,
             "camera_preview": preview_capability(),
         },
+    )
+
+
+@app.get("/healthz")
+async def healthz() -> JSONResponse:
+    checks: dict[str, Any] = {}
+    overall_ok = True
+
+    try:
+        with get_connection() as conn:
+            conn.execute("SELECT 1").fetchone()
+        checks["db"] = {"ok": True}
+    except Exception as exc:
+        overall_ok = False
+        checks["db"] = {"ok": False, "error": str(exc)}
+
+    try:
+        checks["camera"] = {"ok": True, "status": camera_status()}
+    except Exception as exc:
+        overall_ok = False
+        checks["camera"] = {"ok": False, "error": str(exc)}
+
+    try:
+        checks["sync"] = {"ok": True, "status": get_sync_status()}
+    except Exception as exc:
+        overall_ok = False
+        checks["sync"] = {"ok": False, "error": str(exc)}
+
+    try:
+        checks["update"] = {"ok": True, "status": get_update_status(refresh_remote=False)}
+    except Exception as exc:
+        overall_ok = False
+        checks["update"] = {"ok": False, "error": str(exc)}
+
+    status_code = 200 if overall_ok else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"ok": overall_ok, "status": "ok" if overall_ok else "degraded", "checks": checks},
     )
 
 
