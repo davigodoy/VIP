@@ -2,11 +2,10 @@
 Deteccao continua de pessoas (OpenCV HOG) no mesmo fluxo da camera que o preview.
 Gera entradas/saidas via ingest_event — independente do browser aberto.
 
-Emparelhamento IoU + distancia reduz troca de id entre frames. Alem disso, se o HOG
-“perde” a mesma pessoa por flicker e volta a detetar no mesmo sitio em poucos
-segundos, **reutiliza-se o mesmo** `hog_<tid>` (anel de saidas recentes), para nao
-inflar `person_id` unicos. Isto aproxima contagens numa porta estreita; **nao** e
-reconhecimento facial nem garante identidade em multidao.
+Emparelhamento IoU + distancia reduz troca de id. Reutilizacao de `hog_<tid>` apos
+saida recente (anel) aproxima unicos. **Entrada** só depois de varios frames seguidos
+com deteccao; **saida** só se já houve entrada — evita par entrada/saida fantasma
+quando o HOG oscila ao aparecer a pessoa.
 """
 from __future__ import annotations
 
@@ -52,6 +51,8 @@ _MATCH_DIST = 130.0
 _MIN_IOU_MATCH = 0.08
 # Frames sem deteccao antes de contar saida (com ~8 FPS ~4s — reduz saidas por flicker do HOG)
 _MAX_MISSES = 32
+# Frames seguidos com deteccao antes de gravar entrada (evita entrada+saida fantasma no mesmo instante)
+_ENTRADA_MIN_FRAMES = 3
 # Largura maxima do lado maior ao correr HOG (velocidade no Pi)
 _DETECT_MAX_SIDE = 520
 # > 0 reduz falsos positivos (0.0 aceita quase tudo). Subir se ainda houver fantasmas.
@@ -241,30 +242,40 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 tr["cx"], tr["cy"], tr["sz"] = cx, cy, sz
                 tr["rect_small"] = (xs, ys, rws, rhs)
                 tr["misses"] = 0
+                tr["stable_frames"] = int(tr.get("stable_frames", 0)) + 1
+                if (
+                    not tr.get("entrada_commit")
+                    and tr["stable_frames"] >= _ENTRADA_MIN_FRAMES
+                ):
+                    tr["entrada_commit"] = True
+                    to_enter.append(tid)
+                    enter_rect_small[tid] = (xs, ys, rws, rhs)
             else:
                 tr["misses"] = int(tr["misses"]) + 1
+                tr["stable_frames"] = 0
                 if tr["misses"] >= _MAX_MISSES:
-                    rs = tr.get("rect_small")
-                    if rs is not None:
-                        _exit_ring.append(
-                            (
-                                monotonic(),
-                                float(tr["cx"]),
-                                float(tr["cy"]),
-                                float(tr["sz"]),
-                                tid,
+                    if tr.get("entrada_commit"):
+                        rs = tr.get("rect_small")
+                        if rs is not None:
+                            _exit_ring.append(
                                 (
-                                    float(rs[0]),
-                                    float(rs[1]),
-                                    float(rs[2]),
-                                    float(rs[3]),
-                                ),
+                                    monotonic(),
+                                    float(tr["cx"]),
+                                    float(tr["cy"]),
+                                    float(tr["sz"]),
+                                    tid,
+                                    (
+                                        float(rs[0]),
+                                        float(rs[1]),
+                                        float(rs[2]),
+                                        float(rs[3]),
+                                    ),
+                                )
                             )
-                        )
-                    while len(_exit_ring) > _EXIT_RING_CAP:
-                        _exit_ring.pop(0)
+                        while len(_exit_ring) > _EXIT_RING_CAP:
+                            _exit_ring.pop(0)
+                        to_exit.append(tid)
                     del _tracks[tid]
-                    to_exit.append(tid)
 
         nowm = monotonic()
         for i, (cx, cy, sz, xs, ys, rws, rhs) in enumerate(detections):
@@ -295,9 +306,9 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "sz": sz,
                 "misses": 0,
                 "rect_small": rect,
+                "stable_frames": 0,
+                "entrada_commit": False,
             }
-            to_enter.append(tid)
-            enter_rect_small[tid] = rect
 
     for tid in to_exit:
         _emit_saida(tid)
