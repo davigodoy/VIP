@@ -2,15 +2,18 @@
 Deteccao continua de pessoas (OpenCV HOG) no mesmo fluxo da camera que o preview.
 Gera entradas/saidas via ingest_event — independente do browser aberto.
 
-Nota: cada perda de track gera novo `hog_*` e conta como pessoa unica nova.
-Emparelhamento por IoU + distancia reduz troca de id, mas **unicos HOG != pessoas
-reais** (use edge com track estavel para identidade seria).
+Emparelhamento IoU + distancia reduz troca de id entre frames. Alem disso, se o HOG
+“perde” a mesma pessoa por flicker e volta a detetar no mesmo sitio em poucos
+segundos, **reutiliza-se o mesmo** `hog_<tid>` (anel de saidas recentes), para nao
+inflar `person_id` unicos. Isto aproxima contagens numa porta estreita; **nao** e
+reconhecimento facial nem garante identidade em multidao.
 """
 from __future__ import annotations
 
 import logging
 import math
 import threading
+from time import monotonic
 from typing import Any
 
 import numpy as np
@@ -36,6 +39,12 @@ _state_lock = threading.Lock()
 _tracks: dict[int, dict[str, Any]] = {}
 _next_tid = 1
 _last_cfg_off = True
+# Saidas recentes (flicker): reutilizar o mesmo hog_<tid> se voltar a aparecer perto
+_exit_ring: list[tuple[float, float, float, float, int, tuple[float, float, float, float]]] = []
+_EXIT_RING_CAP = 96
+_REUSE_MAX_SEC = 55.0
+_REUSE_DIST = 88.0
+_REUSE_SZ_DIFF = 48.0
 
 # Distancia maxima (pixels no frame redimensionado) para manter o mesmo track
 _MATCH_DIST = 130.0
@@ -76,6 +85,14 @@ def _iou_xywh(
     return inter / union if union > 0.0 else 0.0
 
 
+def _prune_exit_ring(now_m: float) -> None:
+    global _exit_ring
+    keep = _REUSE_MAX_SEC + 15.0
+    _exit_ring = [r for r in _exit_ring if now_m - r[0] <= keep]
+    while len(_exit_ring) > _EXIT_RING_CAP:
+        _exit_ring.pop(0)
+
+
 def _get_hog() -> Any | None:
     global _hog
     if not HAS_CV2 or cv2 is None:
@@ -89,10 +106,11 @@ def _get_hog() -> Any | None:
 
 
 def reset_tracks() -> None:
-    global _tracks, _next_tid
+    global _tracks, _next_tid, _exit_ring
     with _state_lock:
         _tracks.clear()
         _next_tid = 1
+        _exit_ring.clear()
 
 
 def on_frame_bgr(frame: np.ndarray) -> None:
@@ -166,6 +184,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     to_enter: list[int] = []
     enter_rect_small: dict[int, tuple[float, float, float, float]] = {}
     with _state_lock:
+        _prune_exit_ring(monotonic())
         track_ids = list(_tracks.keys())
         used_j: set[int] = set()
         match_tid_to_j: dict[int, int] = {}
@@ -225,15 +244,51 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             else:
                 tr["misses"] = int(tr["misses"]) + 1
                 if tr["misses"] >= _MAX_MISSES:
+                    rs = tr.get("rect_small")
+                    if rs is not None:
+                        _exit_ring.append(
+                            (
+                                monotonic(),
+                                float(tr["cx"]),
+                                float(tr["cy"]),
+                                float(tr["sz"]),
+                                tid,
+                                (
+                                    float(rs[0]),
+                                    float(rs[1]),
+                                    float(rs[2]),
+                                    float(rs[3]),
+                                ),
+                            )
+                        )
+                    while len(_exit_ring) > _EXIT_RING_CAP:
+                        _exit_ring.pop(0)
                     del _tracks[tid]
                     to_exit.append(tid)
 
+        nowm = monotonic()
         for i, (cx, cy, sz, xs, ys, rws, rhs) in enumerate(detections):
             if i in used_j:
                 continue
-            tid = _next_tid
-            _next_tid += 1
             rect = (xs, ys, rws, rhs)
+            reuse_tid: int | None = None
+            for ri in range(len(_exit_ring) - 1, -1, -1):
+                ts, ecx, ecy, esz, etid, _erect = _exit_ring[ri]
+                if nowm - ts > _REUSE_MAX_SEC:
+                    continue
+                if abs(sz - esz) > _REUSE_SZ_DIFF:
+                    continue
+                if math.hypot(cx - ecx, cy - ecy) > _REUSE_DIST:
+                    continue
+                reuse_tid = etid
+                _exit_ring.pop(ri)
+                break
+
+            if reuse_tid is not None:
+                tid = reuse_tid
+            else:
+                tid = _next_tid
+                _next_tid += 1
             _tracks[tid] = {
                 "cx": cx,
                 "cy": cy,
@@ -244,10 +299,10 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             to_enter.append(tid)
             enter_rect_small[tid] = rect
 
-    for tid in to_enter:
-        _emit_entrada(tid, frame, small_w, small_h, w, h, enter_rect_small.get(tid))
     for tid in to_exit:
         _emit_saida(tid)
+    for tid in to_enter:
+        _emit_entrada(tid, frame, small_w, small_h, w, h, enter_rect_small.get(tid))
 
 
 def _emit_entrada(
