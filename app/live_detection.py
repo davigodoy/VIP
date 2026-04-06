@@ -35,10 +35,22 @@ _last_cfg_off = True
 
 # Distancia maxima (pixels no frame redimensionado) para manter o mesmo track
 _MATCH_DIST = 100.0
-# Frames sem deteccao antes de contar saida (com ~8 FPS ~2s de tolerancia)
-_MAX_MISSES = 18
+# Frames sem deteccao antes de contar saida (com ~8 FPS ~3s — reduz saidas por flicker do HOG)
+_MAX_MISSES = 26
 # Largura maxima do lado maior ao correr HOG (velocidade no Pi)
 _DETECT_MAX_SIDE = 520
+# > 0 reduz falsos positivos (0.0 aceita quase tudo). Subir se ainda houver fantasmas.
+_HOG_HIT_THRESHOLD = 0.28
+# Stride maior = menos sensibilidade a ruido, um pouco mais rapido no Pi
+_HOG_WIN_STRIDE = 16
+# Caixas ridiculamente pequenas (sombras, artefactos) ignoradas no frame small
+_HOG_MIN_W = 28
+_HOG_MIN_H = 56
+# Silhueta vertical tipica de pessoa em pe; fora disto o HOG costuma errar
+_HOG_MIN_AR = 1.15
+_HOG_MAX_AR = 4.2
+# Fundir deteccoes sobrepostas (mesma pessoa, varias caixas)
+_HOG_GROUP_EPS = 0.35
 
 
 def _get_hog() -> Any | None:
@@ -90,10 +102,10 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     try:
         out = hog.detectMultiScale(
             gray,
-            winStride=(8, 8),
+            winStride=(_HOG_WIN_STRIDE, _HOG_WIN_STRIDE),
             padding=(16, 16),
             scale=1.06,
-            hitThreshold=0.0,
+            hitThreshold=_HOG_HIT_THRESHOLD,
         )
     except Exception as exc:
         logger.warning("HOG detectMultiScale falhou: %s", exc)
@@ -104,15 +116,28 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     else:
         rects = out
 
-    # (cx, cy, sz, x, y, rw, rh) em coordenadas do frame redimensionado (small)
-    detections: list[tuple[float, float, float, float, float, float, float]] = []
+    rect_list: list[list[int]] = []
     if rects is not None and len(rects) > 0:
         for (_i, (x, y, rw, rh)) in enumerate(rects):
-            cx = float(x + rw / 2.0)
-            cy = float(y + rh / 2.0)
-            detections.append(
-                (cx, cy, float(max(rw, rh)), float(x), float(y), float(rw), float(rh))
-            )
+            xi, yi, wi, hi = int(x), int(y), int(rw), int(rh)
+            if wi < _HOG_MIN_W or hi < _HOG_MIN_H:
+                continue
+            ar = hi / float(max(1, wi))
+            if ar < _HOG_MIN_AR or ar > _HOG_MAX_AR:
+                continue
+            rect_list.append([xi, yi, wi, hi])
+
+    if rect_list:
+        cv2.groupRectangles(rect_list, groupThreshold=1, eps=_HOG_GROUP_EPS)
+
+    # (cx, cy, sz, x, y, rw, rh) em coordenadas do frame redimensionado (small)
+    detections: list[tuple[float, float, float, float, float, float, float]] = []
+    for (xi, yi, wi, hi) in rect_list:
+        cx = float(xi + wi / 2.0)
+        cy = float(yi + hi / 2.0)
+        detections.append(
+            (cx, cy, float(max(wi, hi)), float(xi), float(yi), float(wi), float(hi))
+        )
 
     to_exit: list[int] = []
     to_enter: list[int] = []
