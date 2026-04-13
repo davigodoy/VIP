@@ -280,6 +280,54 @@ class VipTestCase(unittest.TestCase):
         self.assertEqual(day_a_with_id, 0)
         self.assertEqual(day_b_with_id, 1)
 
+    def test_reset_identified_personas_with_day_event_delete(self) -> None:
+        day_a = "2026-04-01"
+        day_b = "2026-04-02"
+        with db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO events (event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender)
+                VALUES (?, NULL, NULL, ?, ?, ?, NULL, NULL)
+                """,
+                ("ev_a1", "p1", "entrada", f"{day_a}T10:00:00+00:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO events (event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender)
+                VALUES (?, NULL, NULL, ?, ?, ?, NULL, NULL)
+                """,
+                ("ev_a2", "p2", "saida", f"{day_a}T11:00:00+00:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO events (event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender)
+                VALUES (?, NULL, NULL, ?, ?, ?, NULL, NULL)
+                """,
+                ("ev_b1", "p3", "entrada", f"{day_b}T10:00:00+00:00"),
+            )
+            conn.commit()
+
+        result = retention.reset_identified_personas(
+            reset_personas_day=day_a,
+            wipe_all_personas=False,
+            delete_day_events=True,
+        )
+        self.assertTrue(result["ok"])
+        self.assertTrue(bool(result["delete_day_events"]))
+        self.assertEqual(int(result["affected_event_rows"]), 2)
+        self.assertEqual(int(result["affected_person_ids"]), 2)
+
+        with db.get_connection() as conn:
+            left_day_a = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS c FROM events WHERE substr(event_ts, 1, 10) = ?",
+                    (day_a,),
+                ).fetchone()["c"]
+            )
+            left_total = int(conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"])
+        self.assertEqual(left_day_a, 0)
+        self.assertEqual(left_total, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

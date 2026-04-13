@@ -302,12 +302,16 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
 
 
 def reset_identified_personas(
-    *, reset_personas_day: str | None = None, wipe_all_personas: bool = False
+    *,
+    reset_personas_day: str | None = None,
+    wipe_all_personas: bool = False,
+    delete_day_events: bool = False,
 ) -> dict[str, Any]:
     """
     Limpa identificadores de pessoa sem apagar eventos.
 
     - Dia especifico: zera temp_id dos eventos daquele dia (YYYY-MM-DD)
+    - Dia especifico + delete_day_events=True: remove todos os eventos daquele dia
     - Global: zera temp_id de todos os eventos
     - Sempre limpa estado operacional (temp_tracks/profiles) e recomputa agregados
     """
@@ -322,6 +326,14 @@ def reset_identified_personas(
     if not day and not wipe_all_personas:
         raise ValueError(
             "Informe reset_personas_day ou marque wipe_all_personas para executar o reset."
+        )
+    if delete_day_events and not day:
+        raise ValueError(
+            "delete_day_events exige reset_personas_day informado."
+        )
+    if delete_day_events and wipe_all_personas:
+        raise ValueError(
+            "Use delete_day_events para data especifica ou wipe_all_personas para reset global."
         )
 
     with get_connection() as conn:
@@ -353,6 +365,12 @@ def reset_identified_personas(
                 """
             )
         else:
+            day_total_rows = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS c FROM events WHERE substr(event_ts, 1, 10) = ?",
+                    (day,),
+                ).fetchone()["c"]
+            )
             affected_rows = int(
                 conn.execute(
                     """
@@ -378,16 +396,23 @@ def reset_identified_personas(
                     (day,),
                 ).fetchone()["c"]
             )
-            conn.execute(
-                """
-                UPDATE events
-                SET temp_id = NULL
-                WHERE substr(event_ts, 1, 10) = ?
-                  AND temp_id IS NOT NULL
-                  AND TRIM(COALESCE(temp_id, '')) != ''
-                """,
-                (day,),
-            )
+            if delete_day_events:
+                conn.execute(
+                    "DELETE FROM events WHERE substr(event_ts, 1, 10) = ?",
+                    (day,),
+                )
+                affected_rows = day_total_rows
+            else:
+                conn.execute(
+                    """
+                    UPDATE events
+                    SET temp_id = NULL
+                    WHERE substr(event_ts, 1, 10) = ?
+                      AND temp_id IS NOT NULL
+                      AND TRIM(COALESCE(temp_id, '')) != ''
+                    """,
+                    (day,),
+                )
 
         wiped_temp_tracks = int(
             conn.execute("SELECT COUNT(*) AS c FROM temp_tracks").fetchone()["c"]
@@ -427,6 +452,7 @@ def reset_identified_personas(
         "ok": True,
         "reset_personas_day": day or None,
         "wipe_all_personas": bool(wipe_all_personas),
+        "delete_day_events": bool(delete_day_events),
         "affected_event_rows": affected_rows,
         "affected_person_ids": affected_person_ids,
         "wiped_temp_tracks": wiped_temp_tracks,

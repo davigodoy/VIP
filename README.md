@@ -246,6 +246,7 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 - `POST /api/personas/reset` — reset operacional de personas identificadas
   sem apagar eventos:
   - `reset_personas_day` (`YYYY-MM-DD`) limpa `temp_id` dos eventos dessa data
+  - `delete_day_events` (`true`) com `reset_personas_day`: remove todos os eventos da data
   - `wipe_all_personas` (`true`) limpa `temp_id` de todos os eventos
   A rotina limpa estado operacional (`temp_tracks`, `profiles`) e recomputa agregados.
 

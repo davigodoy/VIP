@@ -202,4 +202,5 @@ class PersonasResetRequest(BaseModel):
         pattern=r"^\d{4}-\d{2}-\d{2}$",
         description="Data YYYY-MM-DD para limpar temp_id dos eventos desse dia.",
     )
+    delete_day_events: bool = False
     wipe_all_personas: bool = False
