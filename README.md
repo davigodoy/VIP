@@ -24,7 +24,9 @@ Escopo funcional:
 - **Envolvimento** (visitante / frequentador / membro): dias de calendario distintos com
   entrada numa janela movel (ex. 30 dias); **visitante** ate N dias distintos,
   **frequentador** ate M (M > N), acima disso **membro**; N e M configuraveis no painel.
-  Requer `person_id` estavel entre visitas (edge). Ver `GET /api/people/involvement`
+  Requer `person_id` estavel entre visitas (edge). IDs locais `hog_*` (detector no
+  servidor) sao ignorados nesse calculo para evitar falsos visitantes.
+  Ver `GET /api/people/involvement`
 
 ## Conferencia com o rascunho de objetivos (igreja / Pi 4)
 
@@ -240,6 +242,12 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 - `GET /api/people/involvement` — `person_id` com entrada na janela; campos
   `visit_days`, `envolvimento` (`visitante` | `frequentador` | `membro`), `last_entrada`;
   query `limit`, `offset`. Regras e `nota_identidade` no JSON.
+
+- `POST /api/personas/reset` — reset operacional de personas identificadas
+  (limpa `service_event_people`, `service_event_stats`, `temp_tracks`, `profiles`)
+  e, opcionalmente, remove eventos:
+  - `reset_events_day` (`YYYY-MM-DD`) para apagar eventos de uma data especifica
+  - `delete_all_events` (`true`) para apagar todos os eventos
 
 - `POST` ou `PATCH` em `/api/config/involvement` — JSON com `envolvimento_janela_dias`, `envolvimento_max_dias_visitante`, `envolvimento_max_dias_frequentador`; grava so essas chaves (o painel usa **POST** no botao **Salvar regras de envolvimento** sem recarregar a pagina).
 

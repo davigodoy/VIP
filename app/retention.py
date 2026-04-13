@@ -34,6 +34,7 @@ _INVOLVEMENT_WHERE_ENTRADA = """
     event_type = 'entrada'
     AND temp_id IS NOT NULL
     AND TRIM(COALESCE(temp_id, '')) != ''
+    AND temp_id NOT LIKE 'hog\_%' ESCAPE '\\'
     AND LENGTH(COALESCE(event_ts, '')) >= 10
     AND substr(event_ts, 1, 10) >= date('now', ?)
 """
@@ -298,6 +299,72 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
         )
         conn.commit()
         return result
+
+
+def reset_identified_personas(
+    *, reset_events_day: str | None = None, delete_all_events: bool = False
+) -> dict[str, Any]:
+    """
+    Limpa estado de personas/metricas ao vivo e, opcionalmente, remove eventos.
+
+    - Sempre limpa: service_event_people, service_event_stats, temp_tracks, profiles
+    - Opcional:
+      - reset_events_day=YYYY-MM-DD: apaga eventos desse dia
+      - delete_all_events=True: apaga todos os eventos
+    """
+    day = (reset_events_day or "").strip()
+    if day:
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("Data invalida em reset_events_day (use YYYY-MM-DD).") from exc
+
+    with get_connection() as conn:
+        counts = {
+            "service_event_people": int(
+                conn.execute("SELECT COUNT(*) AS c FROM service_event_people").fetchone()["c"]
+            ),
+            "service_event_stats": int(
+                conn.execute("SELECT COUNT(*) AS c FROM service_event_stats").fetchone()["c"]
+            ),
+            "temp_tracks": int(
+                conn.execute("SELECT COUNT(*) AS c FROM temp_tracks").fetchone()["c"]
+            ),
+            "profiles": int(conn.execute("SELECT COUNT(*) AS c FROM profiles").fetchone()["c"]),
+            "events": 0,
+        }
+        if delete_all_events:
+            counts["events"] = int(
+                conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"]
+            )
+        elif day:
+            counts["events"] = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS c FROM events WHERE substr(event_ts, 1, 10) = ?",
+                    (day,),
+                ).fetchone()["c"]
+            )
+
+        conn.execute("DELETE FROM service_event_people")
+        conn.execute("DELETE FROM service_event_stats")
+        conn.execute("DELETE FROM temp_tracks")
+        conn.execute("DELETE FROM profiles")
+        if delete_all_events:
+            conn.execute("DELETE FROM events")
+        elif day:
+            conn.execute(
+                "DELETE FROM events WHERE substr(event_ts, 1, 10) = ?",
+                (day,),
+            )
+        conn.commit()
+
+    invalidate_involvement_summary_cache()
+    return {
+        "ok": True,
+        "reset_events_day": day or None,
+        "delete_all_events": bool(delete_all_events),
+        "deleted": counts,
+    }
 
 
 def payload_from_config(config: RetentionConfig) -> dict[str, Any]:
@@ -1087,7 +1154,8 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
         "people": people,
         "nota_identidade": (
             "Fidedigno quando o edge envia o mesmo person_id em cada visita. "
-            "Deteccao HOG no servidor gera ids de track que mudam — nao use para membro/visitante nesse modo."
+            "IDs locais hog_* (detector HOG no servidor) sao ignorados no envolvimento "
+            "para evitar falsos visitantes por troca de track."
         ),
     }
 

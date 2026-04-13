@@ -515,6 +515,24 @@
           <button type="button" id="cleanup-dry-btn" class="secondary">Simular limpeza (dry-run)</button>
           <button type="button" id="cleanup-real-btn" class="danger">Executar limpeza agora</button>
         </div>
+        <hr />
+        <h3>Reset de personas identificadas</h3>
+        <p class="help">
+          Zera o estado de personas/metricas ao vivo (<code>service_event_people</code>, <code>service_event_stats</code>, <code>temp_tracks</code> e <code>profiles</code>).
+          Opcionalmente, apaga tambem eventos de uma data (ex.: primeiro dia com ruido).
+        </p>
+        <div class="grid">
+          <label>Apagar eventos desta data (opcional)
+            <input type="date" id="personas-reset-day" />
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="personas-reset-delete-all-events" />
+            Apagar TODOS os eventos (perigoso)
+          </label>
+        </div>
+        <div class="cleanup-actions">
+          <button type="button" id="personas-reset-btn" class="danger">Executar reset de personas</button>
+        </div>
       </section>
 
       <section class="card">
@@ -2009,6 +2027,49 @@
       }
     }
 
+    async function runPersonasReset() {
+      const dayEl = document.getElementById('personas-reset-day');
+      const allEl = document.getElementById('personas-reset-delete-all-events');
+      const btn = document.getElementById('personas-reset-btn');
+      const resetDay = dayEl && dayEl.value ? String(dayEl.value) : null;
+      const deleteAll = !!(allEl && allEl.checked);
+
+      let confirmMsg = 'Executar reset de personas identificadas? Isso zera estado e metricas ao vivo.';
+      if (deleteAll) {
+        confirmMsg += '\n\nATENCAO: esta opcao tambem apaga TODOS os eventos.';
+      } else if (resetDay) {
+        confirmMsg += `\n\nTambem serao apagados eventos da data ${resetDay}.`;
+      }
+      if (!confirm(confirmMsg)) return;
+
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(vipUrl('api/personas/reset'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            reset_events_day: resetDay,
+            delete_all_events: deleteAll,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error', 7000);
+          return;
+        }
+        const d = data.deleted || {};
+        const msg = `Reset concluido. Pessoas=${d.service_event_people ?? 0}, stats=${d.service_event_stats ?? 0}, temp_tracks=${d.temp_tracks ?? 0}, profiles=${d.profiles ?? 0}, events=${d.events ?? 0}.`;
+        showVipToast(msg, 'success', 7000);
+        refreshLive();
+        refreshCharts();
+        refreshEnvolvimento();
+      } catch (err) {
+        showVipToast('Falha de rede no reset de personas.', 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
     async function refreshEnvolvimento() {
       const body = document.getElementById('envolvimento-body');
       const resumo = document.getElementById('envolvimento-resumo');
@@ -2055,6 +2116,7 @@
     bindScheduleSection();
     document.getElementById('cleanup-dry-btn')?.addEventListener('click', () => runCleanupAjax(true));
     document.getElementById('cleanup-real-btn')?.addEventListener('click', () => runCleanupAjax(false));
+    document.getElementById('personas-reset-btn')?.addEventListener('click', runPersonasReset);
 
     consumeUrlToast();
     bindCameraDevices();

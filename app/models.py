@@ -187,3 +187,17 @@ class EventIngestRequest(BaseModel):
     age_band: AgeBand | None = None
     age_estimate: int | None = Field(default=None, ge=0, le=120)
     gender: GenderBand | None = None
+
+
+class PersonasResetRequest(BaseModel):
+    """
+    Reset operacional das personas identificadas (estado ao vivo) e, opcionalmente,
+    limpeza de eventos de uma data especifica.
+    """
+
+    reset_events_day: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="Data YYYY-MM-DD para apagar eventos desse dia.",
+    )
+    delete_all_events: bool = False

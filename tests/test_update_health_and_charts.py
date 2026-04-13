@@ -163,6 +163,104 @@ class VipTestCase(unittest.TestCase):
         self.assertTrue(body["checks"]["db"]["ok"])
         self.assertTrue(body["checks"]["camera"]["ok"])
 
+    def test_people_involvement_ignores_local_hog_ids(self) -> None:
+        now = datetime.now(UTC)
+        self._insert_event(
+            event_id="hog-in-1",
+            event_type="entrada",
+            event_ts=(now - timedelta(days=1)).isoformat(),
+            temp_id="hog_123",
+        )
+        self._insert_event(
+            event_id="edge-in-1",
+            event_type="entrada",
+            event_ts=(now - timedelta(days=2)).isoformat(),
+            temp_id="edge_person_1",
+        )
+
+        data = retention.get_people_involvement(limit=50, offset=0)
+        ids = {str(row["person_id"]) for row in data["people"]}
+
+        self.assertIn("edge_person_1", ids)
+        self.assertNotIn("hog_123", ids)
+        self.assertEqual(int(data["summary"]["visitante"]), 1)
+        self.assertEqual(int(data["total"]), 1)
+
+    def test_reset_identified_personas_with_day_event_purge(self) -> None:
+        day_a = "2026-04-01"
+        day_b = "2026-04-02"
+        with db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO service_event_people (
+                    culto_id, person_id, first_seen_at, last_seen_at,
+                    entries_count, exits_count, returns_count, age_band, gender,
+                    last_direction, last_exit_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "__global__",
+                    "p1",
+                    f"{day_a}T10:00:00+00:00",
+                    f"{day_a}T10:00:00+00:00",
+                    1,
+                    0,
+                    0,
+                    None,
+                    None,
+                    "entrada",
+                    None,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO service_event_stats (culto_id, entries_count, exits_count, returns_count, unique_people_count,
+                    current_occupancy, peak_occupancy, crianca_count, junior_count, adolescente_count, jovem_count,
+                    adulto_count, idoso_count, homem_count, mulher_count, updated_at)
+                VALUES ('__global__', 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, CURRENT_TIMESTAMP)
+                """
+            )
+            conn.execute(
+                "INSERT INTO temp_tracks (temp_id, culto_id) VALUES ('t1', '__global__')"
+            )
+            conn.execute(
+                "INSERT INTO profiles (profile_id) VALUES ('profile_1')"
+            )
+            conn.execute(
+                """
+                INSERT INTO events (event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender)
+                VALUES (?, NULL, NULL, ?, ?, ?, NULL, NULL)
+                """,
+                ("ev_a", "p1", "entrada", f"{day_a}T10:00:00+00:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO events (event_id, culto_id, profile_id, temp_id, event_type, event_ts, age_band, gender)
+                VALUES (?, NULL, NULL, ?, ?, ?, NULL, NULL)
+                """,
+                ("ev_b", "p2", "entrada", f"{day_b}T10:00:00+00:00"),
+            )
+            conn.commit()
+
+        result = retention.reset_identified_personas(
+            reset_events_day=day_a,
+            delete_all_events=False,
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(int(result["deleted"]["events"]), 1)
+        self.assertEqual(int(result["deleted"]["service_event_people"]), 1)
+        self.assertEqual(int(result["deleted"]["service_event_stats"]), 1)
+        self.assertEqual(int(result["deleted"]["temp_tracks"]), 1)
+        self.assertEqual(int(result["deleted"]["profiles"]), 1)
+
+        with db.get_connection() as conn:
+            left_events = int(conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"])
+            left_people = int(
+                conn.execute("SELECT COUNT(*) AS c FROM service_event_people").fetchone()["c"]
+            )
+        self.assertEqual(left_events, 1)
+        self.assertEqual(left_people, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

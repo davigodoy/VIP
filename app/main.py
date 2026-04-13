@@ -24,6 +24,7 @@ from .models import (
     CameraDeviceSelect,
     EventIngestRequest,
     InvolvementRulesUpdate,
+    PersonasResetRequest,
     ReconciliationApplyRequest,
     RetentionConfig,
     ServiceScheduleCreate,
@@ -50,6 +51,7 @@ from .retention import (
     list_events_for_reconciliation_export,
     list_schedules,
     load_config,
+    reset_identified_personas,
     request_reconciliation_run,
     request_system_update_run,
     run_reconciliation_job,
@@ -359,6 +361,18 @@ async def cleanup(payload: dict[str, bool]) -> JSONResponse:
 async def api_ingest_event(payload: EventIngestRequest) -> JSONResponse:
     try:
         result = ingest_event(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content=result)
+
+
+@app.post("/api/personas/reset")
+async def api_personas_reset(payload: PersonasResetRequest) -> JSONResponse:
+    try:
+        result = reset_identified_personas(
+            reset_events_day=payload.reset_events_day,
+            delete_all_events=payload.delete_all_events,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(content=result)
