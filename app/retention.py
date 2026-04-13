@@ -302,68 +302,137 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
 
 
 def reset_identified_personas(
-    *, reset_events_day: str | None = None, delete_all_events: bool = False
+    *, reset_personas_day: str | None = None, wipe_all_personas: bool = False
 ) -> dict[str, Any]:
     """
-    Limpa estado de personas/metricas ao vivo e, opcionalmente, remove eventos.
+    Limpa identificadores de pessoa sem apagar eventos.
 
-    - Sempre limpa: service_event_people, service_event_stats, temp_tracks, profiles
-    - Opcional:
-      - reset_events_day=YYYY-MM-DD: apaga eventos desse dia
-      - delete_all_events=True: apaga todos os eventos
+    - Dia especifico: zera temp_id dos eventos daquele dia (YYYY-MM-DD)
+    - Global: zera temp_id de todos os eventos
+    - Sempre limpa estado operacional (temp_tracks/profiles) e recomputa agregados
     """
-    day = (reset_events_day or "").strip()
+    day = (reset_personas_day or "").strip()
     if day:
         try:
             datetime.strptime(day, "%Y-%m-%d")
         except ValueError as exc:
-            raise ValueError("Data invalida em reset_events_day (use YYYY-MM-DD).") from exc
+            raise ValueError(
+                "Data invalida em reset_personas_day (use YYYY-MM-DD)."
+            ) from exc
+    if not day and not wipe_all_personas:
+        raise ValueError(
+            "Informe reset_personas_day ou marque wipe_all_personas para executar o reset."
+        )
 
     with get_connection() as conn:
-        counts = {
-            "service_event_people": int(
-                conn.execute("SELECT COUNT(*) AS c FROM service_event_people").fetchone()["c"]
-            ),
-            "service_event_stats": int(
-                conn.execute("SELECT COUNT(*) AS c FROM service_event_stats").fetchone()["c"]
-            ),
-            "temp_tracks": int(
-                conn.execute("SELECT COUNT(*) AS c FROM temp_tracks").fetchone()["c"]
-            ),
-            "profiles": int(conn.execute("SELECT COUNT(*) AS c FROM profiles").fetchone()["c"]),
-            "events": 0,
-        }
-        if delete_all_events:
-            counts["events"] = int(
-                conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"]
-            )
-        elif day:
-            counts["events"] = int(
+        if wipe_all_personas:
+            affected_rows = int(
                 conn.execute(
-                    "SELECT COUNT(*) AS c FROM events WHERE substr(event_ts, 1, 10) = ?",
+                    """
+                    SELECT COUNT(*) AS c FROM events
+                    WHERE temp_id IS NOT NULL AND TRIM(COALESCE(temp_id, '')) != ''
+                    """
+                ).fetchone()["c"]
+            )
+            affected_person_ids = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM (
+                      SELECT temp_id FROM events
+                      WHERE temp_id IS NOT NULL AND TRIM(COALESCE(temp_id, '')) != ''
+                      GROUP BY temp_id
+                    )
+                    """
+                ).fetchone()["c"]
+            )
+            conn.execute(
+                """
+                UPDATE events
+                SET temp_id = NULL
+                WHERE temp_id IS NOT NULL AND TRIM(COALESCE(temp_id, '')) != ''
+                """
+            )
+        else:
+            affected_rows = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM events
+                    WHERE substr(event_ts, 1, 10) = ?
+                      AND temp_id IS NOT NULL
+                      AND TRIM(COALESCE(temp_id, '')) != ''
+                    """,
                     (day,),
                 ).fetchone()["c"]
             )
-
-        conn.execute("DELETE FROM service_event_people")
-        conn.execute("DELETE FROM service_event_stats")
-        conn.execute("DELETE FROM temp_tracks")
-        conn.execute("DELETE FROM profiles")
-        if delete_all_events:
-            conn.execute("DELETE FROM events")
-        elif day:
+            affected_person_ids = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM (
+                      SELECT temp_id FROM events
+                      WHERE substr(event_ts, 1, 10) = ?
+                        AND temp_id IS NOT NULL
+                        AND TRIM(COALESCE(temp_id, '')) != ''
+                      GROUP BY temp_id
+                    )
+                    """,
+                    (day,),
+                ).fetchone()["c"]
+            )
             conn.execute(
-                "DELETE FROM events WHERE substr(event_ts, 1, 10) = ?",
+                """
+                UPDATE events
+                SET temp_id = NULL
+                WHERE substr(event_ts, 1, 10) = ?
+                  AND temp_id IS NOT NULL
+                  AND TRIM(COALESCE(temp_id, '')) != ''
+                """,
                 (day,),
             )
+
+        wiped_temp_tracks = int(
+            conn.execute("SELECT COUNT(*) AS c FROM temp_tracks").fetchone()["c"]
+        )
+        wiped_profiles = int(conn.execute("SELECT COUNT(*) AS c FROM profiles").fetchone()["c"])
+        conn.execute("DELETE FROM temp_tracks")
+        conn.execute("DELETE FROM profiles")
         conn.commit()
+
+    # Reconstroi agregados/pessoas a partir de events (agora com temp_id limpo no periodo pedido).
+    cfg = load_config()
+    with get_connection() as conn:
+        event_rows = conn.execute(
+            """
+            SELECT temp_id, event_type, event_ts, age_band, gender
+            FROM events
+            ORDER BY event_ts ASC, id ASC
+            """
+        ).fetchall()
+    rows_list = list(event_rows)
+    by_culto: dict[str, list[Any]] = defaultdict(list)
+    for r in rows_list:
+        cid = derive_report_culto_id_for_event_ts(str(r["event_ts"]))
+        if cid and str(cid).strip():
+            by_culto[str(cid)].append(r)
+    stats, people = recompute_reconciliation_metrics(rows_list, cfg.janela_reentrada_min)
+    per_culto: list[tuple[str, dict[str, int], dict[str, dict[str, Any]]]] = []
+    for cid in sorted(by_culto.keys()):
+        st, pe = recompute_reconciliation_metrics(
+            by_culto[cid], cfg.janela_reentrada_min
+        )
+        per_culto.append((cid, st, pe))
+    write_full_reconciliation_all_partitions(stats, people, per_culto)
 
     invalidate_involvement_summary_cache()
     return {
         "ok": True,
-        "reset_events_day": day or None,
-        "delete_all_events": bool(delete_all_events),
-        "deleted": counts,
+        "reset_personas_day": day or None,
+        "wipe_all_personas": bool(wipe_all_personas),
+        "affected_event_rows": affected_rows,
+        "affected_person_ids": affected_person_ids,
+        "wiped_temp_tracks": wiped_temp_tracks,
+        "wiped_profiles": wiped_profiles,
+        "reconciled_events": len(rows_list),
+        "reconciled_partitions": 1 + len(per_culto),
     }
 
 

@@ -186,7 +186,7 @@ class VipTestCase(unittest.TestCase):
         self.assertEqual(int(data["summary"]["visitante"]), 1)
         self.assertEqual(int(data["total"]), 1)
 
-    def test_reset_identified_personas_with_day_event_purge(self) -> None:
+    def test_reset_identified_personas_with_day_scrub_keeps_events(self) -> None:
         day_a = "2026-04-01"
         day_b = "2026-04-02"
         with db.get_connection() as conn:
@@ -243,23 +243,42 @@ class VipTestCase(unittest.TestCase):
             conn.commit()
 
         result = retention.reset_identified_personas(
-            reset_events_day=day_a,
-            delete_all_events=False,
+            reset_personas_day=day_a,
+            wipe_all_personas=False,
         )
         self.assertTrue(result["ok"])
-        self.assertEqual(int(result["deleted"]["events"]), 1)
-        self.assertEqual(int(result["deleted"]["service_event_people"]), 1)
-        self.assertEqual(int(result["deleted"]["service_event_stats"]), 1)
-        self.assertEqual(int(result["deleted"]["temp_tracks"]), 1)
-        self.assertEqual(int(result["deleted"]["profiles"]), 1)
+        self.assertEqual(int(result["affected_event_rows"]), 1)
+        self.assertEqual(int(result["affected_person_ids"]), 1)
+        self.assertEqual(int(result["wiped_temp_tracks"]), 1)
+        self.assertEqual(int(result["wiped_profiles"]), 1)
 
         with db.get_connection() as conn:
             left_events = int(conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"])
-            left_people = int(
-                conn.execute("SELECT COUNT(*) AS c FROM service_event_people").fetchone()["c"]
+            day_a_with_id = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM events
+                    WHERE substr(event_ts, 1, 10) = ?
+                      AND temp_id IS NOT NULL
+                      AND TRIM(COALESCE(temp_id, '')) != ''
+                    """,
+                    (day_a,),
+                ).fetchone()["c"]
             )
-        self.assertEqual(left_events, 1)
-        self.assertEqual(left_people, 0)
+            day_b_with_id = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM events
+                    WHERE substr(event_ts, 1, 10) = ?
+                      AND temp_id IS NOT NULL
+                      AND TRIM(COALESCE(temp_id, '')) != ''
+                    """,
+                    (day_b,),
+                ).fetchone()["c"]
+            )
+        self.assertEqual(left_events, 2)
+        self.assertEqual(day_a_with_id, 0)
+        self.assertEqual(day_b_with_id, 1)
 
 
 if __name__ == "__main__":

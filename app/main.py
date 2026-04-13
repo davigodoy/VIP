@@ -370,8 +370,8 @@ async def api_ingest_event(payload: EventIngestRequest) -> JSONResponse:
 async def api_personas_reset(payload: PersonasResetRequest) -> JSONResponse:
     try:
         result = reset_identified_personas(
-            reset_events_day=payload.reset_events_day,
-            delete_all_events=payload.delete_all_events,
+            reset_personas_day=payload.reset_personas_day,
+            wipe_all_personas=payload.wipe_all_personas,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

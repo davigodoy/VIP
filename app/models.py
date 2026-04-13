@@ -191,13 +191,15 @@ class EventIngestRequest(BaseModel):
 
 class PersonasResetRequest(BaseModel):
     """
-    Reset operacional das personas identificadas (estado ao vivo) e, opcionalmente,
-    limpeza de eventos de uma data especifica.
+    Reset operacional das personas identificadas.
+
+    Mantem os eventos, mas remove identificadores de pessoa (temp_id) para impedir
+    que um dia ruidoso contamine unicos/envolvimento.
     """
 
-    reset_events_day: str | None = Field(
+    reset_personas_day: str | None = Field(
         default=None,
         pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="Data YYYY-MM-DD para apagar eventos desse dia.",
+        description="Data YYYY-MM-DD para limpar temp_id dos eventos desse dia.",
     )
-    delete_all_events: bool = False
+    wipe_all_personas: bool = False

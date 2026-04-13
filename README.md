@@ -244,10 +244,10 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
   query `limit`, `offset`. Regras e `nota_identidade` no JSON.
 
 - `POST /api/personas/reset` — reset operacional de personas identificadas
-  (limpa `service_event_people`, `service_event_stats`, `temp_tracks`, `profiles`)
-  e, opcionalmente, remove eventos:
-  - `reset_events_day` (`YYYY-MM-DD`) para apagar eventos de uma data especifica
-  - `delete_all_events` (`true`) para apagar todos os eventos
+  sem apagar eventos:
+  - `reset_personas_day` (`YYYY-MM-DD`) limpa `temp_id` dos eventos dessa data
+  - `wipe_all_personas` (`true`) limpa `temp_id` de todos os eventos
+  A rotina limpa estado operacional (`temp_tracks`, `profiles`) e recomputa agregados.
 
 - `POST` ou `PATCH` em `/api/config/involvement` — JSON com `envolvimento_janela_dias`, `envolvimento_max_dias_visitante`, `envolvimento_max_dias_frequentador`; grava so essas chaves (o painel usa **POST** no botao **Salvar regras de envolvimento** sem recarregar a pagina).
 

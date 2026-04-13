@@ -519,15 +519,16 @@
         <h3>Reset de personas identificadas</h3>
         <p class="help">
           Zera o estado de personas/metricas ao vivo (<code>service_event_people</code>, <code>service_event_stats</code>, <code>temp_tracks</code> e <code>profiles</code>).
-          Opcionalmente, apaga tambem eventos de uma data (ex.: primeiro dia com ruido).
+          Sem apagar eventos: limpa o <code>person_id</code> (temp_id) dos eventos de uma data
+          para remover contaminacao de um dia ruidoso.
         </p>
         <div class="grid">
-          <label>Apagar eventos desta data (opcional)
+          <label>Limpar personas desta data (opcional)
             <input type="date" id="personas-reset-day" />
           </label>
           <label class="checkbox">
-            <input type="checkbox" id="personas-reset-delete-all-events" />
-            Apagar TODOS os eventos (perigoso)
+            <input type="checkbox" id="personas-reset-wipe-all-personas" />
+            Limpar personas de TODOS os eventos (nao apaga os eventos)
           </label>
         </div>
         <div class="cleanup-actions">
@@ -2029,16 +2030,20 @@
 
     async function runPersonasReset() {
       const dayEl = document.getElementById('personas-reset-day');
-      const allEl = document.getElementById('personas-reset-delete-all-events');
+      const allEl = document.getElementById('personas-reset-wipe-all-personas');
       const btn = document.getElementById('personas-reset-btn');
       const resetDay = dayEl && dayEl.value ? String(dayEl.value) : null;
-      const deleteAll = !!(allEl && allEl.checked);
+      const wipeAll = !!(allEl && allEl.checked);
+      if (!resetDay && !wipeAll) {
+        showVipToast('Informe uma data ou marque limpar todas as personas.', 'error');
+        return;
+      }
 
       let confirmMsg = 'Executar reset de personas identificadas? Isso zera estado e metricas ao vivo.';
-      if (deleteAll) {
-        confirmMsg += '\n\nATENCAO: esta opcao tambem apaga TODOS os eventos.';
+      if (wipeAll) {
+        confirmMsg += '\n\nEsta opcao vai limpar personas em TODOS os eventos (os eventos permanecem).';
       } else if (resetDay) {
-        confirmMsg += `\n\nTambem serao apagados eventos da data ${resetDay}.`;
+        confirmMsg += `\n\nSerao limpas as personas dos eventos da data ${resetDay} (sem apagar eventos).`;
       }
       if (!confirm(confirmMsg)) return;
 
@@ -2048,8 +2053,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({
-            reset_events_day: resetDay,
-            delete_all_events: deleteAll,
+            reset_personas_day: resetDay,
+            wipe_all_personas: wipeAll,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -2057,8 +2062,7 @@
           showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error', 7000);
           return;
         }
-        const d = data.deleted || {};
-        const msg = `Reset concluido. Pessoas=${d.service_event_people ?? 0}, stats=${d.service_event_stats ?? 0}, temp_tracks=${d.temp_tracks ?? 0}, profiles=${d.profiles ?? 0}, events=${d.events ?? 0}.`;
+        const msg = `Reset concluido. Linhas afetadas=${data.affected_event_rows ?? 0}, person_id afetados=${data.affected_person_ids ?? 0}.`;
         showVipToast(msg, 'success', 7000);
         refreshLive();
         refreshCharts();
