@@ -274,6 +274,9 @@
 
         <section id="sec-config-sync" class="card">
           <h2>Planilha online (Google Sheets)</h2>
+          <p class="help">
+            Dica: voce pode abrir a planilha em nova aba para autenticar no Google pelo navegador.
+          </p>
           <div class="grid">
             <label class="checkbox"><input type="checkbox" name="sync_google_sheets_enabled" {% if config.sync_google_sheets_enabled %}checked{% endif %} />Sincronizar com Google Sheets</label>
             <label>Intervalo de sync (segundos)<input type="number" name="sync_interval_sec" min="30" max="3600" value="{{ config.sync_interval_sec }}" required /></label>
@@ -290,6 +293,11 @@
             <label>Nome da variavel (modo env)<input type="text" name="sync_credentials_env_var" value="{{ config.sync_credentials_env_var }}" placeholder="VIP_GSHEETS_CREDENTIALS_JSON" /></label>
             <label>Caminho arquivo (modo file)<input type="text" name="sync_credentials_file_path" value="{{ config.sync_credentials_file_path }}" placeholder="/opt/vip/creds/service-account.json" /></label>
             <label class="full">Credenciais JSON (modo inline)<textarea name="sync_credentials_json" rows="6" placeholder='{"type":"service_account",...}'>{{ config.sync_credentials_json }}</textarea></label>
+          </div>
+          <div class="actions">
+            <button type="button" id="sync-auto-setup" class="secondary">Configurar planilha (1 clique)</button>
+            <button type="button" id="sync-fetch-sheet-info" class="secondary">Obter dados da planilha com 1 clique</button>
+            <button type="button" id="open-sheet-tab" class="secondary">Abrir planilha em nova aba</button>
           </div>
         </section>
 
@@ -1066,6 +1074,112 @@
         }
       });
     }
+
+    function normalizeSpreadsheetKey(raw) {
+      const v = String(raw || '').trim();
+      if (!v) return '';
+      const m = v.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (m && m[1]) return m[1];
+      return v;
+    }
+
+    async function fetchSpreadsheetInfoAndFill() {
+      const form = document.getElementById('vip-config-form');
+      const idInput = form ? form.querySelector('[name="sync_spreadsheet_id"]') : null;
+      const wsInput = form ? form.querySelector('[name="sync_worksheet_name"]') : null;
+      const btn = document.getElementById('sync-fetch-sheet-info');
+      if (!idInput || !wsInput || !btn) return;
+      const candidate = String(idInput.value || '').trim();
+      if (!candidate) {
+        showVipToast('Cole o ID/URL da planilha e clique novamente.', 'error');
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const url = vipUrl(`api/sync/spreadsheet-info?spreadsheet=${encodeURIComponent(candidate)}`);
+        const res = await fetch(url, { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error', 7000);
+          return;
+        }
+        idInput.value = data.spreadsheet_id || candidate;
+        if (data.suggested_worksheet_name) {
+          wsInput.value = data.suggested_worksheet_name;
+        }
+        const n = Number(data.worksheet_count || 0);
+        const title = data.spreadsheet_title ? ` (${data.spreadsheet_title})` : '';
+        showVipToast(`Planilha detectada${title}: ${n} aba(s) encontrada(s). Campos preenchidos.`, 'success', 7000);
+      } catch (err) {
+        showVipToast('Falha de rede ao consultar dados da planilha.', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('sync-fetch-sheet-info')?.addEventListener('click', fetchSpreadsheetInfoAndFill);
+
+    async function autoSetupSpreadsheetSync() {
+      const form = document.getElementById('vip-config-form');
+      const idInput = form ? form.querySelector('[name="sync_spreadsheet_id"]') : null;
+      const wsInput = form ? form.querySelector('[name="sync_worksheet_name"]') : null;
+      const syncEnabled = form ? form.querySelector('[name="sync_google_sheets_enabled"]') : null;
+      const btn = document.getElementById('sync-auto-setup');
+      if (!idInput || !wsInput || !syncEnabled || !btn) return;
+      const candidate = String(idInput.value || '').trim();
+      if (!candidate) {
+        showVipToast('Cole o ID/URL da planilha antes de configurar.', 'error');
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await fetch(vipUrl('api/sync/auto-setup'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            spreadsheet: candidate,
+            worksheet_name: String(wsInput.value || '').trim(),
+            enable_sync: true,
+            run_test_sync: true,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showVipToast(formatVip422Detail(data.detail) || `Erro HTTP ${res.status}`, 'error', 7000);
+          return;
+        }
+        const cfg = data.configured || {};
+        if (cfg.sync_spreadsheet_id) idInput.value = cfg.sync_spreadsheet_id;
+        if (cfg.sync_worksheet_name) wsInput.value = cfg.sync_worksheet_name;
+        syncEnabled.checked = !!cfg.sync_google_sheets_enabled;
+        const test = data.test_sync || {};
+        const synced = Number(test.rows_synced || 0);
+        const testMsg = test.message ? ` Teste: ${test.message}.` : '';
+        showVipToast(`Config concluida com sucesso.${synced >= 0 ? ` Linhas sincronizadas no teste: ${synced}.` : ''}${testMsg}`, 'success', 8000);
+        refreshLive();
+      } catch (err) {
+        showVipToast('Falha de rede ao configurar planilha automaticamente.', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('sync-auto-setup')?.addEventListener('click', autoSetupSpreadsheetSync);
+
+    document.getElementById('open-sheet-tab')?.addEventListener('click', () => {
+      const form = document.getElementById('vip-config-form');
+      const input = form ? form.querySelector('[name="sync_spreadsheet_id"]') : null;
+      const key = normalizeSpreadsheetKey(input ? input.value : '');
+      if (!key) {
+        showVipToast('Informe o Spreadsheet ID para abrir a planilha.', 'error');
+        return;
+      }
+      const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(key)}/edit`;
+      const opened = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        showVipToast('O navegador bloqueou a nova aba. Permita pop-ups para este site.', 'error', 7000);
+      }
+    });
 
     const previewImg = document.getElementById('camera-preview-img');
     const previewMeta = document.getElementById('preview-meta');

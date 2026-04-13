@@ -30,6 +30,7 @@ from .models import (
     ServiceScheduleCreate,
     ServiceScheduleOut,
     ServiceScheduleUpdate,
+    SyncAutoSetupRequest,
 )
 from .retention import (
     apply_camera_device,
@@ -72,7 +73,12 @@ from .camera_preview import (
     preview_disengage,
     preview_engage,
 )
-from .sheets_sync import get_sync_status, sync_events_to_google_sheets
+from .sheets_sync import (
+    auto_setup_sync_from_spreadsheet,
+    get_sync_status,
+    inspect_sync_spreadsheet,
+    sync_events_to_google_sheets,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEEKDAY_LABELS = {
@@ -319,6 +325,35 @@ async def api_sync_status() -> JSONResponse:
 async def api_sync_run() -> JSONResponse:
     result = await asyncio.to_thread(sync_events_to_google_sheets, 1000)
     return JSONResponse(content=result)
+
+
+@app.get("/api/sync/spreadsheet-info")
+async def api_sync_spreadsheet_info(
+    spreadsheet: str | None = Query(
+        default=None,
+        description="Spreadsheet ID ou URL completa da planilha",
+    ),
+) -> JSONResponse:
+    try:
+        data = await asyncio.to_thread(inspect_sync_spreadsheet, spreadsheet)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content=data)
+
+
+@app.post("/api/sync/auto-setup")
+async def api_sync_auto_setup(payload: SyncAutoSetupRequest) -> JSONResponse:
+    try:
+        data = await asyncio.to_thread(
+            auto_setup_sync_from_spreadsheet,
+            spreadsheet_input=payload.spreadsheet,
+            worksheet_name=payload.worksheet_name,
+            enable_sync=payload.enable_sync,
+            run_test_sync=payload.run_test_sync,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content=data)
 
 
 @app.get("/api/schedules", response_model=list[ServiceScheduleOut])

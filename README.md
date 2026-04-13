@@ -265,6 +265,8 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 
 - `GET /api/sync/status`
 - `POST /api/sync/run`
+- `GET /api/sync/spreadsheet-info?spreadsheet=<id-ou-url>` — valida acesso e sugere aba
+- `POST /api/sync/auto-setup` — configura `spreadsheet_id`/aba, ativa sync e roda teste
 
 ### Conciliacao
 

@@ -204,3 +204,12 @@ class PersonasResetRequest(BaseModel):
     )
     delete_day_events: bool = False
     wipe_all_personas: bool = False
+
+
+class SyncAutoSetupRequest(BaseModel):
+    """Configura Google Sheets com minimo de interacao no painel."""
+
+    spreadsheet: str = Field(min_length=3, max_length=800)
+    worksheet_name: str = Field(default="", max_length=120)
+    enable_sync: bool = True
+    run_test_sync: bool = True
