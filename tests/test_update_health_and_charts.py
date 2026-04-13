@@ -9,7 +9,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from app import db, main, retention
+import numpy as np
+
+from app import anonymous_face_reid, db, main, retention
 
 
 class VipTestCase(unittest.TestCase):
@@ -327,6 +329,24 @@ class VipTestCase(unittest.TestCase):
             left_total = int(conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"])
         self.assertEqual(left_day_a, 0)
         self.assertEqual(left_total, 1)
+
+    def test_anonymous_face_reid_reuses_person_id_for_similar_face(self) -> None:
+        if not anonymous_face_reid.HAS_CV2:
+            self.skipTest("OpenCV indisponivel no ambiente de teste")
+
+        base = np.zeros((96, 96, 3), dtype=np.uint8)
+        # Face sintetica simples para teste de recorrencia anonima.
+        base[:, :] = (90, 90, 90)
+        base[20:80, 20:80] = (180, 180, 180)
+        base[38:46, 36:44] = (20, 20, 20)
+        base[38:46, 52:60] = (20, 20, 20)
+        base[58:64, 40:56] = (30, 30, 30)
+
+        var = np.clip(base.astype(np.int16) + 5, 0, 255).astype(np.uint8)
+        pid1 = anonymous_face_reid.resolve_anonymous_person_id(base)
+        pid2 = anonymous_face_reid.resolve_anonymous_person_id(var)
+        self.assertIsNotNone(pid1)
+        self.assertEqual(pid1, pid2)
 
 
 if __name__ == "__main__":

@@ -300,7 +300,7 @@
             A <strong>frequencia</strong> e o numero de <strong>dias de calendario distintos</strong> em que houve pelo menos uma <em>entrada</em> nesse periodo (nao e numero de cultos).
             Defina dois limites inclusivos: quem esta ate o primeiro e <em>visitante</em>; acima disso ate o segundo e <em>frequentador</em>; acima do segundo e <em>membro</em>.
             Ex.: janela 30, visitante ate 2, frequentador ate 5 &rarr; 1-2 dias = visitante, 3-5 = frequentador, 6+ = membro.
-            Requer <code>person_id</code> estavel (edge). Com HOG, os ids mudam entre visitas.
+            Requer <code>person_id</code> estavel (edge ou match facial anonimo quando houver rosto visivel). Sem rosto claro, o fallback HOG pode trocar id entre visitas.
           </p>
           <div class="grid">
             <label>Janela (dias)<input type="number" name="envolvimento_janela_dias" min="7" max="120" value="{{ config.envolvimento_janela_dias }}" required title="Todos os niveis contam entradas neste periodo movel" /></label>

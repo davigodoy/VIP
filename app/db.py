@@ -81,6 +81,14 @@ def init_db() -> None:
                 seen_count INTEGER NOT NULL DEFAULT 1
             );
 
+            CREATE TABLE IF NOT EXISTS anon_face_profiles (
+                person_id TEXT PRIMARY KEY,
+                embedding_json TEXT NOT NULL,
+                first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                seen_count INTEGER NOT NULL DEFAULT 1
+            );
+
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id TEXT NOT NULL UNIQUE,

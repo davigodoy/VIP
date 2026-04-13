@@ -24,8 +24,9 @@ Escopo funcional:
 - **Envolvimento** (visitante / frequentador / membro): dias de calendario distintos com
   entrada numa janela movel (ex. 30 dias); **visitante** ate N dias distintos,
   **frequentador** ate M (M > N), acima disso **membro**; N e M configuraveis no painel.
-  Requer `person_id` estavel entre visitas (edge). IDs locais `hog_*` (detector no
-  servidor) sao ignorados nesse calculo para evitar falsos visitantes.
+  Requer `person_id` estavel entre visitas (edge ou recorrencia facial anonima no servidor).
+  IDs locais `hog_*` (detector sem match facial) sao ignorados nesse calculo para evitar
+  falsos visitantes.
   Ver `GET /api/people/involvement`
 
 ## Conferencia com o rascunho de objetivos (igreja / Pi 4)

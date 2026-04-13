@@ -17,6 +17,8 @@ from typing import Any
 
 import numpy as np
 
+from .anonymous_face_reid import resolve_anonymous_person_id
+from .demographics_opencv import extract_largest_face_crop
 from .demographics_opencv import estimate_demographics_optional
 from .models import EventIngestRequest, GenderBand
 from .retention import ingest_event, load_config
@@ -39,7 +41,17 @@ _tracks: dict[int, dict[str, Any]] = {}
 _next_tid = 1
 _last_cfg_off = True
 # Saidas recentes (flicker): reutilizar o mesmo hog_<tid> se voltar a aparecer perto
-_exit_ring: list[tuple[float, float, float, float, int, tuple[float, float, float, float]]] = []
+_exit_ring: list[
+    tuple[
+        float,
+        float,
+        float,
+        float,
+        int,
+        tuple[float, float, float, float],
+        str | None,
+    ]
+] = []
 _EXIT_RING_CAP = 96
 _REUSE_MAX_SEC = 55.0
 _REUSE_DIST = 88.0
@@ -181,7 +193,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             (cx, cy, float(max(wi, hi)), float(xi), float(yi), float(wi), float(hi))
         )
 
-    to_exit: list[int] = []
+    to_exit: list[tuple[int, str]] = []
     to_enter: list[int] = []
     enter_rect_small: dict[int, tuple[float, float, float, float]] = {}
     with _state_lock:
@@ -270,11 +282,13 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                                         float(rs[2]),
                                         float(rs[3]),
                                     ),
+                                    str(tr.get("person_id") or ""),
                                 )
                             )
                         while len(_exit_ring) > _EXIT_RING_CAP:
                             _exit_ring.pop(0)
-                        to_exit.append(tid)
+                        exit_pid = str(tr.get("person_id") or f"hog_{tid}")
+                        to_exit.append((tid, exit_pid))
                     del _tracks[tid]
 
         nowm = monotonic()
@@ -284,7 +298,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             rect = (xs, ys, rws, rhs)
             reuse_tid: int | None = None
             for ri in range(len(_exit_ring) - 1, -1, -1):
-                ts, ecx, ecy, esz, etid, _erect = _exit_ring[ri]
+                ts, ecx, ecy, esz, etid, _erect, eperson = _exit_ring[ri]
                 if nowm - ts > _REUSE_MAX_SEC:
                     continue
                 if abs(sz - esz) > _REUSE_SZ_DIFF:
@@ -308,12 +322,19 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "rect_small": rect,
                 "stable_frames": 0,
                 "entrada_commit": False,
+                "person_id": eperson if reuse_tid is not None else None,
             }
 
-    for tid in to_exit:
-        _emit_saida(tid)
+    for _tid, pid in to_exit:
+        _emit_saida(pid)
     for tid in to_enter:
-        _emit_entrada(tid, frame, small_w, small_h, w, h, enter_rect_small.get(tid))
+        resolved_pid = _emit_entrada(
+            tid, frame, small_w, small_h, w, h, enter_rect_small.get(tid)
+        )
+        with _state_lock:
+            tr = _tracks.get(tid)
+            if tr is not None:
+                tr["person_id"] = resolved_pid
 
 
 def _emit_entrada(
@@ -324,7 +345,7 @@ def _emit_entrada(
     full_w: int,
     full_h: int,
     rect_small: tuple[float, float, float, float] | None,
-) -> None:
+) -> str:
     pid = f"hog_{track_id}"
     cfg = load_config()
     want_age = bool(cfg.estimar_faixa_etaria)
@@ -332,7 +353,7 @@ def _emit_entrada(
     age_est: int | None = None
     gender_band: GenderBand | None = None
 
-    if (want_age or want_gender) and rect_small is not None and HAS_CV2 and cv2 is not None:
+    if rect_small is not None and HAS_CV2 and cv2 is not None:
         sx, sy, srw, srh = rect_small
         if small_w > 0 and small_h > 0 and full_w > 0 and full_h > 0:
             fx = full_w / float(small_w)
@@ -347,11 +368,17 @@ def _emit_entrada(
             y1 = max(y0 + 1, min(y1, full_h))
             crop = frame_bgr[y0:y1, x0:x1]
             if crop.size > 0:
-                age_est, g = estimate_demographics_optional(
-                    crop, want_age=want_age, want_gender=want_gender
-                )
-                if g in ("homem", "mulher"):
-                    gender_band = g
+                face_crop = extract_largest_face_crop(crop)
+                if face_crop is not None:
+                    anon_id = resolve_anonymous_person_id(face_crop)
+                    if anon_id:
+                        pid = anon_id
+                if want_age or want_gender:
+                    age_est, g = estimate_demographics_optional(
+                        crop, want_age=want_age, want_gender=want_gender
+                    )
+                    if g in ("homem", "mulher"):
+                        gender_band = g
 
     try:
         req = EventIngestRequest(
@@ -363,10 +390,10 @@ def _emit_entrada(
         ingest_event(req)
     except Exception as exc:
         logger.warning("ingest entrada falhou (%s): %s", pid, exc)
+    return pid
 
 
-def _emit_saida(track_id: int) -> None:
-    pid = f"hog_{track_id}"
+def _emit_saida(pid: str) -> None:
     try:
         ingest_event(
             EventIngestRequest(person_id=pid, direction="saida")

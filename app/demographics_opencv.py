@@ -135,6 +135,33 @@ def _largest_face(
     return x, y, rw, rh
 
 
+def extract_largest_face_crop(bgr_crop: np.ndarray) -> np.ndarray | None:
+    """
+    Extrai o maior rosto de um recorte BGR (ou None se nao encontrar).
+    """
+    if not HAS_CV2 or cv2 is None:
+        return None
+    if bgr_crop is None or bgr_crop.size == 0:
+        return None
+    h, w = bgr_crop.shape[:2]
+    if h < 16 or w < 16:
+        return None
+    gray = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2GRAY)
+    face = _largest_face(gray)
+    if face is None:
+        return None
+    fx, fy, frw, frh = face
+    pad = max(2, int(min(frw, frh) * 0.08))
+    x0 = max(0, fx - pad)
+    y0 = max(0, fy - pad)
+    x1 = min(w, fx + frw + pad)
+    y1 = min(h, fy + frh + pad)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    face_bgr = bgr_crop[y0:y1, x0:x1]
+    return face_bgr if face_bgr.size > 0 else None
+
+
 def estimate_demographics_optional(
     bgr_crop: np.ndarray,
     *,
@@ -160,20 +187,8 @@ def estimate_demographics_optional(
     if h < 16 or w < 16:
         return None, None
 
-    gray = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2GRAY)
-    face = _largest_face(gray)
-    if face is None:
-        return None, None
-    fx, fy, frw, frh = face
-    pad = max(2, int(min(frw, frh) * 0.08))
-    x0 = max(0, fx - pad)
-    y0 = max(0, fy - pad)
-    x1 = min(w, fx + frw + pad)
-    y1 = min(h, fy + frh + pad)
-    if x1 <= x0 or y1 <= y0:
-        return None, None
-    face_bgr = bgr_crop[y0:y1, x0:x1]
-    if face_bgr.size == 0:
+    face_bgr = extract_largest_face_crop(bgr_crop)
+    if face_bgr is None:
         return None, None
 
     blob = cv2.dnn.blobFromImage(

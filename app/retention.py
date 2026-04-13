@@ -30,7 +30,7 @@ from .models import (
 # Agregados ao vivo e fila de pessoas: um unico registro (culto na agenda e so para exibicao/consulta).
 GLOBAL_STATS_ID = "__global__"
 
-_INVOLVEMENT_WHERE_ENTRADA = """
+_INVOLVEMENT_WHERE_ENTRADA = r"""
     event_type = 'entrada'
     AND temp_id IS NOT NULL
     AND TRIM(COALESCE(temp_id, '')) != ''
@@ -236,9 +236,10 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
     policies = {
         "temp_tracks": f"datetime('now', '-{config.retencao_temp_id_horas} hours')",
         "profiles": f"datetime('now', '-{config.retencao_profile_dias} days')",
-            "events": f"datetime('now', '{event_cutoff_mod}')",
+        "events": f"datetime('now', '{event_cutoff_mod}')",
         "aggregated_metrics": f"datetime('now', '-{config.retencao_agregados_meses} months')",
         "snapshots": f"datetime('now', '-{config.retencao_imagens_horas} hours')",
+        "anon_face_profiles": f"datetime('now', '-{config.retencao_profile_dias} days')",
     }
 
     with get_connection() as conn:
@@ -248,6 +249,9 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
             ).fetchone()["c"],
             "profiles": conn.execute(
                 f"SELECT COUNT(*) AS c FROM profiles WHERE last_seen < {policies['profiles']}"
+            ).fetchone()["c"],
+            "anon_face_profiles": conn.execute(
+                f"SELECT COUNT(*) AS c FROM anon_face_profiles WHERE last_seen < {policies['anon_face_profiles']}"
             ).fetchone()["c"],
             "events": conn.execute(
                 """
@@ -271,6 +275,9 @@ def execute_cleanup(*, dry_run: bool) -> dict[str, Any]:
                 f"DELETE FROM temp_tracks WHERE created_at < {policies['temp_tracks']}"
             )
             conn.execute(f"DELETE FROM profiles WHERE last_seen < {policies['profiles']}")
+            conn.execute(
+                f"DELETE FROM anon_face_profiles WHERE last_seen < {policies['anon_face_profiles']}"
+            )
             conn.execute(
                 """
                 DELETE FROM events
@@ -418,8 +425,12 @@ def reset_identified_personas(
             conn.execute("SELECT COUNT(*) AS c FROM temp_tracks").fetchone()["c"]
         )
         wiped_profiles = int(conn.execute("SELECT COUNT(*) AS c FROM profiles").fetchone()["c"])
+        wiped_anon_face_profiles = int(
+            conn.execute("SELECT COUNT(*) AS c FROM anon_face_profiles").fetchone()["c"]
+        )
         conn.execute("DELETE FROM temp_tracks")
         conn.execute("DELETE FROM profiles")
+        conn.execute("DELETE FROM anon_face_profiles")
         conn.commit()
 
     # Reconstroi agregados/pessoas a partir de events (agora com temp_id limpo no periodo pedido).
@@ -457,6 +468,7 @@ def reset_identified_personas(
         "affected_person_ids": affected_person_ids,
         "wiped_temp_tracks": wiped_temp_tracks,
         "wiped_profiles": wiped_profiles,
+        "wiped_anon_face_profiles": wiped_anon_face_profiles,
         "reconciled_events": len(rows_list),
         "reconciled_partitions": 1 + len(per_culto),
     }
