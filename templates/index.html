@@ -280,7 +280,7 @@
           <div class="grid">
             <label class="checkbox"><input type="checkbox" name="sync_google_sheets_enabled" {% if config.sync_google_sheets_enabled %}checked{% endif %} />Sincronizar com Google Sheets</label>
             <label>Intervalo de sync (segundos)<input type="number" name="sync_interval_sec" min="30" max="3600" value="{{ config.sync_interval_sec }}" required /></label>
-            <label>Spreadsheet ID<input type="text" name="sync_spreadsheet_id" value="{{ config.sync_spreadsheet_id }}" placeholder="1AbC..." /></label>
+            <label>URL da planilha (ou ID)<input type="text" name="sync_spreadsheet_id" value="{{ config.sync_spreadsheet_id }}" placeholder="https://docs.google.com/spreadsheets/d/.../edit" /></label>
             <label>Nome da aba<input type="text" name="sync_worksheet_name" value="{{ config.sync_worksheet_name }}" required /></label>
             <label>
               Fonte da credencial
