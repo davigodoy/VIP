@@ -250,6 +250,16 @@ async def api_detection_models() -> JSONResponse:
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
+@app.get("/api/detection/debug")
+async def api_detection_debug() -> JSONResponse:
+    try:
+        from .live_detection import get_tracking_debug
+
+        return JSONResponse(content=get_tracking_debug())
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
 @app.get("/api/camera/devices")
 async def api_camera_devices() -> JSONResponse:
     cameras = await asyncio.to_thread(list_detected_cameras)

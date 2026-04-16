@@ -565,6 +565,29 @@ def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
         logger.warning("ingest %s falhou (%s): %s", direction, pid, exc)
 
 
+def get_tracking_debug() -> dict[str, Any]:
+    """Estado dos tracks para debug ao vivo."""
+    with _state_lock:
+        tracks_info = []
+        for tid, tr in _tracks.items():
+            tracks_info.append({
+                "tid": tid,
+                "cx": round(tr["cx"], 1),
+                "cy": round(tr["cy"], 1),
+                "frames": tr.get("stable_frames", 0),
+                "misses": tr.get("misses", 0),
+                "reid_done": bool(tr.get("reid_done")),
+                "pid": tr.get("person_id"),
+            })
+        return {
+            "active_tracks": len(_tracks),
+            "tracks": tracks_info,
+            "detector": _detector_type or "nenhum",
+            "exit_ring_size": len(_exit_ring),
+            "next_tid": _next_tid,
+        }
+
+
 def get_detection_models_status() -> dict[str, Any]:
     """Status de cada modelo DNN: arquivo presente, carregado, e qual detector ativo."""
     from . import anonymous_face_reid as _reid_mod
