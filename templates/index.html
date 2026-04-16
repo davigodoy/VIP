@@ -581,6 +581,15 @@
         <div class="cleanup-actions">
           <button type="button" id="personas-reset-btn" class="danger">Executar reset de personas</button>
         </div>
+        <hr />
+        <h3>Limpar todos os dados (modo teste)</h3>
+        <p class="help">
+          Remove <strong>todos</strong> os eventos, perfis, metricas, tracks e logs de execucao.
+          Preserva configuracoes e agendas de cultos. Use durante testes para recomecar do zero.
+        </p>
+        <div class="cleanup-actions">
+          <button type="button" id="wipe-all-btn" class="danger">Limpar todos os dados</button>
+        </div>
       </section>
 
       <section class="card">
@@ -725,7 +734,7 @@
     let involvementPage = 1;
 
     function getInvolvementPageSize() {
-      return window.matchMedia('(max-width: 768px)').matches ? 20 : 60;
+      return window.matchMedia('(max-width: 768px)').matches ? 10 : 20;
     }
 
     function compactCell(text, maxLen = 120) {
@@ -2452,6 +2461,29 @@
     document.getElementById('cleanup-dry-btn')?.addEventListener('click', () => runCleanupAjax(true));
     document.getElementById('cleanup-real-btn')?.addEventListener('click', () => runCleanupAjax(false));
     document.getElementById('personas-reset-btn')?.addEventListener('click', runPersonasReset);
+
+    document.getElementById('wipe-all-btn')?.addEventListener('click', async () => {
+      if (!confirm('ATENCAO: Isso vai apagar TODOS os eventos, perfis, metricas e logs.\n\nConfiguracoes e agendas serao preservadas.\n\nContinuar?')) return;
+      const btn = document.getElementById('wipe-all-btn');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(vipUrl('api/data/wipe'), { method: 'POST' });
+        const d = await res.json();
+        if (res.ok && d.ok) {
+          const total = Object.values(d.deleted || {}).reduce((a, b) => a + Math.max(0, b), 0);
+          showVipToast(`Dados limpos: ${total} registros removidos.`, 'success', 5000);
+          refreshLive();
+          refreshCharts();
+          refreshEnvolvimento();
+        } else {
+          showVipToast(d.error || 'Erro ao limpar dados.', 'error');
+        }
+      } catch (e) {
+        showVipToast('Falha de rede.', 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
 
     consumeUrlToast();
     bindCameraDevices();

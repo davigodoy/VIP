@@ -477,6 +477,29 @@ def reset_identified_personas(
     }
 
 
+def wipe_all_test_data() -> dict[str, Any]:
+    """Apaga TODOS os dados transacionais (eventos, perfis, metricas, tracks). Preserva config e agendas."""
+    with get_connection() as conn:
+        counts: dict[str, int] = {}
+        for table in (
+            "events", "service_event_stats", "service_event_people",
+            "temp_tracks", "profiles", "anon_face_profiles",
+            "aggregated_metrics", "snapshots",
+            "reconciliation_runs", "reconciliation_state",
+            "cleanup_runs", "sync_runs", "sync_state",
+            "update_runs", "update_state",
+        ):
+            try:
+                n = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+                counts[table] = int(n)
+                conn.execute(f"DELETE FROM [{table}]")
+            except Exception:
+                counts[table] = -1
+        conn.commit()
+    invalidate_involvement_summary_cache()
+    return {"ok": True, "deleted": counts}
+
+
 def payload_from_config(config: RetentionConfig) -> dict[str, Any]:
     return config.model_dump()
 

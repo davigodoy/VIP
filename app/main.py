@@ -53,6 +53,7 @@ from .retention import (
     list_schedules,
     load_config,
     reset_identified_personas,
+    wipe_all_test_data,
     request_reconciliation_run,
     request_system_update_run,
     run_reconciliation_job,
@@ -422,6 +423,16 @@ async def api_personas_reset(payload: PersonasResetRequest) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(content=result)
+
+
+@app.post("/api/data/wipe")
+async def api_wipe_all_data() -> JSONResponse:
+    try:
+        result = wipe_all_test_data()
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.exception("Erro em /api/data/wipe")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @app.get("/api/metrics/live")
