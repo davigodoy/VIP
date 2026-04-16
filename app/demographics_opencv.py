@@ -166,6 +166,10 @@ def extract_largest_face_crop(bgr_crop: np.ndarray) -> np.ndarray | None:
     return face_bgr if face_bgr.size > 0 else None
 
 
+_MIN_AGE_CONFIDENCE = 0.45
+_MIN_GENDER_CONFIDENCE = 0.55
+
+
 def _run_dnn_inference(
     face_bgr: np.ndarray,
     *,
@@ -187,9 +191,12 @@ def _run_dnn_inference(
             flat = np.array(preds).flatten()
             if flat.size > 0:
                 idx = int(np.argmax(flat))
-                if 0 <= idx < len(_AGE_BUCKETS):
+                conf = float(flat[idx])
+                if conf >= _MIN_AGE_CONFIDENCE and 0 <= idx < len(_AGE_BUCKETS):
                     lo, hi = _AGE_BUCKETS[idx]
                     age_out = max(0, min(120, (lo + hi) // 2))
+                else:
+                    logger.debug("age conf=%.3f idx=%d — descartado", conf, idx)
         except Exception as exc:
             logger.debug("age_net.forward falhou: %s", exc)
 
@@ -199,7 +206,12 @@ def _run_dnn_inference(
             preds = _gender_net.forward()
             flat = np.array(preds).flatten()
             if flat.size >= 2:
-                gender_out = "homem" if int(np.argmax(flat)) == 0 else "mulher"
+                idx = int(np.argmax(flat))
+                conf = float(flat[idx])
+                if conf >= _MIN_GENDER_CONFIDENCE:
+                    gender_out = "homem" if idx == 0 else "mulher"
+                else:
+                    logger.debug("gender conf=%.3f — descartado", conf)
         except Exception as exc:
             logger.debug("gender_net.forward falhou: %s", exc)
 
@@ -262,7 +274,7 @@ def estimate_demographics_from_face(
     _try_load_dnn_nets(want_age=want_age, want_gender=want_gender)
 
     h, w = face_bgr.shape[:2]
-    if h < 20 or w < 20:
+    if h < 50 or w < 50:
         return None, None
 
     return _run_dnn_inference(face_bgr, want_age=want_age, want_gender=want_gender)
