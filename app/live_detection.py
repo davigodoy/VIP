@@ -76,8 +76,8 @@ _MIN_DISPLACEMENT = 8.0
 # Haar fallback params
 _HAAR_SCALE_FACTOR = 1.10
 _HAAR_MIN_NEIGHBORS = 3
-_HAAR_MIN_W = 24
-_HAAR_MIN_H = 24
+_HAAR_MIN_W = 12
+_HAAR_MIN_H = 12
 _HAAR_MAX_W_RATIO = 0.70
 _HAAR_MAX_H_RATIO = 0.80
 
@@ -88,7 +88,7 @@ _YUNET_MAX_W_RATIO = 0.70
 _YUNET_MAX_H_RATIO = 0.80
 
 _FACE_PAD_RATIO = 0.30
-_MIN_CROP_PX = 40
+_MIN_CROP_PX = 20
 
 _diag_frame_count = 0
 _diag_detect_count = 0
