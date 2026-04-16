@@ -60,9 +60,9 @@ _exit_ring: list[
     tuple[float, float, float, float, float, float, int, tuple[float, float, float, float], str | None]
 ] = []
 _EXIT_RING_CAP = 64
-_REUSE_MAX_SEC = 12.0
-_REUSE_DIST = 45.0
-_REUSE_SZ_DIFF = 22.0
+_REUSE_MAX_SEC = 120.0
+_REUSE_DIST = 70.0
+_REUSE_SZ_DIFF = 30.0
 
 _recent_events: dict[str, float] = {}
 _RECENT_EVENT_WINDOW = 120.0
@@ -85,7 +85,7 @@ _HAAR_MAX_W_RATIO = 0.70
 _HAAR_MAX_H_RATIO = 0.80
 
 # YuNet params — threshold baixo para rostos em angulo (rampa, perfil 3/4)
-_YUNET_SCORE_THRESHOLD = 0.30
+_YUNET_SCORE_THRESHOLD = 0.45
 _YUNET_NMS_THRESHOLD = 0.3
 _YUNET_MAX_W_RATIO = 0.70
 _YUNET_MAX_H_RATIO = 0.80
