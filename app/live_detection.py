@@ -530,7 +530,12 @@ def _classify_direction(
 
 
 def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
-    """Emite UM unico evento (entrada ou saida) baseado na direcao do deslocamento."""
+    """Emite UM unico evento (entrada ou saida) baseado na direcao do deslocamento.
+
+    Pessoas paradas (deslocamento < _MIN_DISPLACEMENT) sao contadas como
+    ENTRADA — se ficaram estaveis por tempo suficiente (reid_done), estao
+    presentes no local.
+    """
     dx = tr["cx"] - tr.get("start_cx", tr["cx"])
     dy = tr["cy"] - tr.get("start_cy", tr["cy"])
 
@@ -539,8 +544,8 @@ def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
     direction = _classify_direction(dx, dy, entry_dir)
 
     if direction is None:
-        logger.debug("Track %d ignorado: deslocamento insuficiente (dx=%.1f, dy=%.1f)", tid, dx, dy)
-        return
+        direction = "entrada"
+        logger.debug("Track %d parado (dx=%.1f, dy=%.1f) -> entrada (presenca)", tid, dx, dy)
 
     pid = str(tr.get("person_id") or f"face_{tid}")
     age_est = tr.get("age_est")
