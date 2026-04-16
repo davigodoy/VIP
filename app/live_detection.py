@@ -321,7 +321,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     _diag_detect_count += len(detections)
     now_mono = monotonic()
     if now_mono - _diag_last_log > 10.0:
-        logger.info(
+        logger.warning(
             "DIAG frames=%d detections=%d tracks=%d exit_ring=%d (10s)",
             _diag_frame_count, _diag_detect_count, len(_tracks), len(_exit_ring),
         )
