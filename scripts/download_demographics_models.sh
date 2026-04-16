@@ -30,12 +30,12 @@ AGE_BASE="https://raw.githubusercontent.com/GilLevi/AgeGenderDeepLearning/master
 AGE_F="$DIR/age_net.caffemodel"
 GEN_F="$DIR/gender_net.caffemodel"
 
-# --- YuNet face detector (OpenCV Zoo) ---
-YUNET_URL="https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+# --- YuNet face detector (OpenCV Zoo / Hugging Face) ---
+YUNET_URL="https://huggingface.co/opencv/face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx"
 YUNET_F="$DIR/face_detection_yunet_2023mar.onnx"
 
-# --- SFace face recognizer (OpenCV Zoo) ---
-SFACE_URL="https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+# --- SFace face recognizer (OpenCV Zoo / Hugging Face) ---
+SFACE_URL="https://huggingface.co/opencv/face_recognition_sface/resolve/main/face_recognition_sface_2021dec.onnx"
 SFACE_F="$DIR/face_recognition_sface_2021dec.onnx"
 
 need=0
