@@ -241,9 +241,12 @@ async def get_camera_status() -> JSONResponse:
 
 @app.get("/api/detection/models")
 async def api_detection_models() -> JSONResponse:
-    from .live_detection import get_detection_models_status
+    try:
+        from .live_detection import get_detection_models_status
 
-    return JSONResponse(content=get_detection_models_status())
+        return JSONResponse(content=get_detection_models_status())
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @app.get("/api/camera/devices")

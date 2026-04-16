@@ -517,15 +517,8 @@ def _emit_saida(pid: str) -> None:
 
 def get_detection_models_status() -> dict[str, Any]:
     """Status de cada modelo DNN: arquivo presente, carregado, e qual detector ativo."""
-    from .anonymous_face_reid import _sface, _sface_attempted
-    from .demographics_opencv import (
-        _age_attempted,
-        _age_net,
-        _gender_attempted,
-        _gender_net,
-        _load_ok_age,
-        _load_ok_gender,
-    )
+    from . import anonymous_face_reid as _reid_mod
+    from . import demographics_opencv as _demo_mod
 
     def _file_info(name: str) -> dict[str, Any]:
         p = _MODEL_DIR / name
@@ -538,6 +531,15 @@ def get_detection_models_status() -> dict[str, Any]:
     age_file = _file_info("age_net.caffemodel")
     gender_file = _file_info("gender_net.caffemodel")
 
+    sface_obj = getattr(_reid_mod, "_sface", None)
+    sface_tried = getattr(_reid_mod, "_sface_attempted", False)
+    age_obj = getattr(_demo_mod, "_age_net", None)
+    age_ok = getattr(_demo_mod, "_load_ok_age", False)
+    age_tried = getattr(_demo_mod, "_age_attempted", False)
+    gender_obj = getattr(_demo_mod, "_gender_net", None)
+    gender_ok = getattr(_demo_mod, "_load_ok_gender", False)
+    gender_tried = getattr(_demo_mod, "_gender_attempted", False)
+
     return {
         "detector": {
             "active": _detector_type or "nenhum",
@@ -549,23 +551,23 @@ def get_detection_models_status() -> dict[str, Any]:
             "haar_fallback": _detector_type == "haar",
         },
         "reid": {
-            "active": "sface" if _sface is not None else ("dct" if _sface_attempted else "nenhum"),
+            "active": "sface" if sface_obj is not None else ("dct" if sface_tried else "nenhum"),
             "sface": {
                 **sface_file,
-                "loaded": _sface is not None,
-                "attempted": _sface_attempted,
+                "loaded": sface_obj is not None,
+                "attempted": sface_tried,
             },
         },
         "demographics": {
             "age": {
                 **age_file,
-                "loaded": _age_net is not None and _load_ok_age,
-                "attempted": _age_attempted,
+                "loaded": age_obj is not None and age_ok,
+                "attempted": age_tried,
             },
             "gender": {
                 **gender_file,
-                "loaded": _gender_net is not None and _load_ok_gender,
-                "attempted": _gender_attempted,
+                "loaded": gender_obj is not None and gender_ok,
+                "attempted": gender_tried,
             },
         },
     }

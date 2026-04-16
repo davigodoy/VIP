@@ -2431,7 +2431,7 @@
           `<li>${icon(sf)} <strong>SFace</strong> &mdash; ${label(sf)}${sf.size_mb ? ' (' + sf.size_mb + ' MB)' : ''}</li>` +
           `<li>${icon(ag)} <strong>Idade</strong> &mdash; ${label(ag)}${ag.size_mb ? ' (' + ag.size_mb + ' MB)' : ''}</li>` +
           `<li>${icon(ge)} <strong>Genero</strong> &mdash; ${label(ge)}${ge.size_mb ? ' (' + ge.size_mb + ' MB)' : ''}</li>`;
-      } catch { list.innerHTML = '<li>Indisponivel</li>'; }
+      } catch (e) { list.innerHTML = '<li>Indisponivel</li>'; }
     }
 
     document.getElementById('save-envolvimento-config')?.addEventListener('click', saveInvolvementConfig);
