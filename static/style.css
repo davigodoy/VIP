@@ -1,16 +1,11 @@
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
 }
 
-/*
- * Breakpoints (mobile-first mental model):
- *   <=900px  — telemovel landscape, tablet estreito: menu no topo, graficos 1 coluna
- *   <=768px  — telemovel retrato / iPhone: tabelas em cartoes, cultos em coluna, formularios 1 col
- *   <=640px  — cartoes e botoes confortaveis para dedo
- *   <=480px  — telemovel estreito: metricas 1 coluna, safe-area (entalhe iPhone)
- */
-
-/* Base legivel em telemovel: ~17px; evita herdar 12–13px em demasia */
 html {
   font-size: clamp(16px, 0.2rem + 3.2vw, 18px);
   -webkit-text-size-adjust: 100%;
@@ -31,7 +26,6 @@ body {
   display: grid;
   grid-template-columns: 230px 1fr;
   min-height: 100vh;
-  min-width: 0;
   width: 100%;
 }
 
@@ -76,7 +70,6 @@ body {
   margin: 0 auto;
   padding: 1.1rem 1rem 1.5rem;
   width: 100%;
-  min-width: 0;
   overflow-x: hidden;
 }
 
@@ -123,13 +116,19 @@ h3 {
   line-height: 1.55;
 }
 
+.help,
+.warn {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .card {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   padding: 1rem 1.1rem;
   margin-bottom: 1rem;
-  min-width: 0;
+  overflow: hidden;
 }
 
 .live-card {
@@ -146,7 +145,6 @@ h3 {
   font-size: 0.92rem;
   margin-bottom: 8px;
   line-height: 1.4;
-  max-width: 100%;
   word-break: break-word;
 }
 
@@ -162,7 +160,7 @@ h3 {
 }
 
 .preview-frame-wrap {
-  max-width: 720px;
+  width: 100%;
   background: #0f172a;
   border-radius: 10px;
   overflow: hidden;
@@ -206,15 +204,9 @@ h3 {
   margin: 10px 0 0;
 }
 
-.camera-select-row > * {
-  min-width: 0;
-}
-
 .camera-device-select {
   flex: 1 1 0;
   width: 100%;
-  min-width: 0;
-  max-width: 100%;
   padding: 10px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 7px;
@@ -241,7 +233,7 @@ h3 {
 
 .live-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
   gap: 10px;
   margin-top: 10px;
 }
@@ -281,7 +273,6 @@ h3 {
   border-radius: 8px;
   padding: 8px;
   background: #fff;
-  min-width: 0;
   overflow: hidden;
 }
 
@@ -291,8 +282,6 @@ h3 {
   color: #334155;
 }
 
-/* Chart.js com maintainAspectRatio: false exige altura fixa no pai; senao o canvas
-   e o layout podem entrar em loop de resize e a pagina cresce indefinidamente. */
 .chart-canvas-wrap {
   position: relative;
   width: 100%;
@@ -307,7 +296,7 @@ h3 {
 
 .chart-canvas-wrap canvas {
   display: block;
-  max-width: 100%;
+  width: 100%;
 }
 
 .chart-range-card {
@@ -332,14 +321,11 @@ h3 {
 
 .chart-range-toolbar label {
   font-size: 0.95rem;
-  min-width: 0;
-  flex: 1 1 14rem;
+  flex: 1 1 0;
 }
 
 .chart-range-toolbar input[type="datetime-local"] {
-  min-width: 0;
   width: 100%;
-  flex: 1 1 14rem;
 }
 
 .chart-range-meta,
@@ -352,11 +338,6 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 10px;
-  min-width: 0;
-}
-
-.grid > * {
-  min-width: 0;
 }
 
 label {
@@ -364,8 +345,6 @@ label {
   flex-direction: column;
   gap: 6px;
   font-size: 1rem;
-  min-width: 0;
-  max-width: 100%;
 }
 
 input[type="number"],
@@ -374,6 +353,7 @@ input[type="time"],
 input[type="datetime-local"],
 select,
 textarea {
+  width: 100%;
   padding: 10px 11px;
   border: 1px solid #d1d5db;
   border-radius: 7px;
@@ -383,16 +363,9 @@ textarea {
 }
 
 textarea {
-  width: 100%;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9rem;
   line-height: 1.45;
-}
-
-input,
-select,
-textarea {
-  max-width: 100%;
 }
 
 .checkbox {
@@ -423,7 +396,6 @@ button {
   cursor: pointer;
   font-size: 1rem;
   line-height: 1.35;
-  max-width: 100%;
   white-space: normal;
   word-break: break-word;
 }
@@ -447,7 +419,6 @@ button.danger {
   overflow-x: auto;
 }
 
-/* Tabelas largas viram "cartoes" empilhados (telemovel / tablet estreito) */
 @media (max-width: 768px) {
   .table-wrap--stack {
     overflow-x: visible;
@@ -524,12 +495,6 @@ button.danger {
   line-height: 1.5;
 }
 
-.help,
-.warn {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 .progress-wrap {
   display: flex;
   align-items: center;
@@ -576,7 +541,6 @@ button.danger {
 
 .cell-ellipsis {
   display: inline-block;
-  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -617,11 +581,6 @@ details[open] summary {
 
 .camera-config-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-width: 0;
-}
-
-.camera-config-grid > * {
-  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -732,7 +691,6 @@ thead {
   background: #f9fafb;
 }
 
-/* <=900px: iPhone landscape (~844px), tablets estreitos — deixa de haver sidebar fixa */
 @media (max-width: 900px) {
   body {
     padding-left: env(safe-area-inset-left, 0px);
@@ -752,7 +710,6 @@ thead {
     margin-bottom: 0.75rem;
   }
 
-  /* Uma fila com scroll horizontal: menos altura que muitas linhas de links */
   .menu {
     display: flex;
     flex-direction: row;
@@ -763,10 +720,6 @@ thead {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
     padding-bottom: 6px;
-    margin: 0;
-    padding-left: 0;
-    padding-right: 0;
-    max-width: 100%;
   }
 
   .menu a {
@@ -817,7 +770,6 @@ thead {
 
   .schedule-row .inline-actions button {
     flex: 1 1 auto;
-    min-width: min(100%, 140px);
   }
 
   .live-grid {
@@ -895,7 +847,6 @@ thead {
     border-radius: 10px;
   }
 
-  /* Nao reduzir titulos no telemovel — ja usam clamp no global */
   button {
     min-height: 46px;
   }
@@ -912,7 +863,6 @@ thead {
     left: 12px;
     right: 12px;
     bottom: 12px;
-    max-width: none;
     align-items: stretch;
   }
 
@@ -930,14 +880,8 @@ thead {
     height: 190px;
     max-height: 190px;
   }
-
-  .chart-range-toolbar input[type="datetime-local"] {
-    min-width: 0;
-    width: 100%;
-  }
 }
 
-/* Toasts (feedback apos gravar / acoes) */
 .vip-toast-host {
   position: fixed;
   bottom: 20px;
@@ -947,7 +891,7 @@ thead {
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
   pointer-events: none;
 }
 
