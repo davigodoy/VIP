@@ -206,9 +206,14 @@ h3 {
   margin: 10px 0 0;
 }
 
+.camera-select-row > * {
+  min-width: 0;
+}
+
 .camera-device-select {
-  flex: 1 1 220px;
-  min-width: min(100%, 220px);
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   padding: 10px 12px;
   border: 1px solid #cbd5e1;
@@ -327,10 +332,14 @@ h3 {
 
 .chart-range-toolbar label {
   font-size: 0.95rem;
+  min-width: 0;
+  flex: 1 1 14rem;
 }
 
 .chart-range-toolbar input[type="datetime-local"] {
-  min-width: 14rem;
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 14rem;
 }
 
 .chart-range-meta,
@@ -341,7 +350,7 @@ h3 {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 10px;
   min-width: 0;
 }
@@ -648,7 +657,7 @@ details[open] summary {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 12px;
 }
 
