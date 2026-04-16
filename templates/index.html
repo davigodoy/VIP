@@ -2453,6 +2453,10 @@
 
     document.getElementById('save-envolvimento-config')?.addEventListener('click', saveInvolvementConfig);
 
+    document.querySelector('select[name="camera_entry_direction"]')?.addEventListener('change', () => {
+      saveVipConfigFull();
+    });
+
     document.getElementById('vip-config-form')?.addEventListener('submit', (ev) => {
       ev.preventDefault();
       saveVipConfigFull();
