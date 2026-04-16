@@ -25,6 +25,10 @@ class RetentionConfig(BaseModel):
     camera_inference_height: int = Field(ge=120, le=1080)
     camera_fps: int = Field(ge=1, le=60)
     live_detection_enabled: bool
+    camera_entry_direction: Literal["down", "up", "left", "right"] = Field(
+        default="down",
+        description="Direcao do movimento de quem ENTRA no frame da camera (down=desce, up=sobe, left=esquerda, right=direita).",
+    )
     culto_antecedencia_min: int = Field(ge=0, le=180)
     culto_duracao_min: int = Field(ge=30, le=360)
     estimar_faixa_etaria: bool

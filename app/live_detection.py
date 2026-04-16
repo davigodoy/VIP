@@ -7,8 +7,9 @@ Pipeline por frame:
   2. Detecta rostos: YuNet DNN (se modelo presente) ou Haar Cascade (fallback)
   3. Tracker IoU + distancia mantém identidade entre frames
   4. Acumula o melhor crop (maior area) durante os frames de estabilizacao
-  5. Entrada confirmada apos N frames → melhor crop alimenta re-id + demographics
-  6. Saida gravada apos N frames sem deteccao
+  5. Re-ID + demographics executados apos N frames estaveis (sem emitir evento)
+  6. Quando o track desaparece: direcao de deslocamento determina se e
+     ENTRADA ou SAIDA (1 unico evento por passagem, baseado em camera_entry_direction)
 """
 from __future__ import annotations
 
@@ -67,9 +68,10 @@ _REUSE_SZ_DIFF = 22.0
 _MATCH_DIST = 60.0
 _MIN_IOU_MATCH = 0.08
 _MAX_MISSES = 12
-_ENTRADA_MIN_FRAMES = 3
+_REID_MIN_FRAMES = 3
 _DETECT_MAX_SIDE = 480
 _VELOCITY_SMOOTH = 0.5
+_MIN_DISPLACEMENT = 8.0
 
 # Haar fallback params
 _HAAR_SCALE_FACTOR = 1.10
@@ -310,10 +312,6 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             (cx, cy, float(max(wi, hi)), float(xi), float(yi), float(wi), float(hi))
         )
 
-    to_exit: list[tuple[int, str]] = []
-    to_enter: list[int] = []
-    enter_best_crop: dict[int, np.ndarray] = {}
-
     with _state_lock:
         _prune_exit_ring(monotonic())
         track_ids = list(_tracks.keys())
@@ -390,7 +388,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 tr["misses"] = 0
                 tr["stable_frames"] = int(tr.get("stable_frames", 0)) + 1
 
-                if not tr.get("entrada_commit"):
+                if not tr.get("reid_done"):
                     crop = _padded_face_crop(
                         frame, (xs, ys, rws, rhs),
                         small_w, small_h, w, h,
@@ -402,21 +400,20 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                             tr["best_crop_area"] = area
 
                 if (
-                    not tr.get("entrada_commit")
-                    and tr["stable_frames"] >= _ENTRADA_MIN_FRAMES
+                    not tr.get("reid_done")
+                    and tr["stable_frames"] >= _REID_MIN_FRAMES
                 ):
-                    tr["entrada_commit"] = True
-                    to_enter.append(tid)
+                    tr["reid_done"] = True
                     best = tr.get("best_crop")
                     if best is not None:
-                        enter_best_crop[tid] = best
+                        _resolve_reid_and_demographics(tid, best, tr)
                     tr.pop("best_crop", None)
                     tr.pop("best_crop_area", None)
             else:
                 tr["misses"] = int(tr["misses"]) + 1
                 tr["stable_frames"] = 0
                 if tr["misses"] >= _MAX_MISSES:
-                    if tr.get("entrada_commit"):
+                    if tr.get("reid_done"):
                         rs = tr.get("rect_small")
                         if rs is not None:
                             _exit_ring.append((
@@ -432,8 +429,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                             ))
                         while len(_exit_ring) > _EXIT_RING_CAP:
                             _exit_ring.pop(0)
-                        exit_pid = str(tr.get("person_id") or f"face_{tid}")
-                        to_exit.append((tid, exit_pid))
+                        _emit_directional_event(tid, tr)
                     del _tracks[tid]
 
         nowm = monotonic()
@@ -472,13 +468,17 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "cx": cx,
                 "cy": cy,
                 "sz": sz,
+                "start_cx": cx,
+                "start_cy": cy,
                 "vx": 0.0,
                 "vy": 0.0,
                 "misses": 0,
                 "rect_small": rect,
                 "stable_frames": 0,
-                "entrada_commit": False,
+                "reid_done": False,
                 "person_id": eperson if reuse_tid is not None else None,
+                "age_est": None,
+                "gender_band": None,
                 "best_crop": initial_crop.copy() if initial_crop is not None else None,
                 "best_crop_area": (
                     initial_crop.shape[0] * initial_crop.shape[1]
@@ -487,25 +487,18 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 ),
             }
 
-    for _tid, pid in to_exit:
-        _emit_saida(pid)
-    for tid in to_enter:
-        resolved_pid = _emit_entrada(tid, enter_best_crop.get(tid))
-        with _state_lock:
-            tr = _tracks.get(tid)
-            if tr is not None:
-                tr["person_id"] = resolved_pid
 
 
-def _emit_entrada(track_id: int, best_crop: np.ndarray | None) -> str:
+def _resolve_reid_and_demographics(
+    track_id: int, best_crop: np.ndarray, tr: dict[str, Any]
+) -> None:
+    """Executa re-ID e demographics no crop; armazena resultado no track dict."""
     pid = f"face_{track_id}"
     cfg = load_config()
     want_age = bool(cfg.estimar_faixa_etaria)
     want_gender = bool(cfg.estimar_genero)
-    age_est: int | None = None
-    gender_band: GenderBand | None = None
 
-    if best_crop is not None and HAS_CV2 and cv2 is not None:
+    if HAS_CV2 and cv2 is not None:
         anon_id = resolve_anonymous_person_id(best_crop)
         if anon_id:
             pid = anon_id
@@ -514,26 +507,57 @@ def _emit_entrada(track_id: int, best_crop: np.ndarray | None) -> str:
             age_est, g = estimate_demographics_from_face(
                 best_crop, want_age=want_age, want_gender=want_gender
             )
+            tr["age_est"] = age_est
             if g in ("homem", "mulher"):
-                gender_band = g
+                tr["gender_band"] = g
+
+    tr["person_id"] = pid
+
+
+def _classify_direction(
+    dx: float, dy: float, entry_dir: str
+) -> str | None:
+    """Retorna 'entrada', 'saida' ou None (deslocamento insuficiente)."""
+    if abs(dx) < _MIN_DISPLACEMENT and abs(dy) < _MIN_DISPLACEMENT:
+        return None
+    if entry_dir in ("down", "up"):
+        primary = dy
+        is_entry = (primary > 0.0) if entry_dir == "down" else (primary < 0.0)
+    else:
+        primary = dx
+        is_entry = (primary < 0.0) if entry_dir == "left" else (primary > 0.0)
+    return "entrada" if is_entry else "saida"
+
+
+def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
+    """Emite UM unico evento (entrada ou saida) baseado na direcao do deslocamento."""
+    dx = tr["cx"] - tr.get("start_cx", tr["cx"])
+    dy = tr["cy"] - tr.get("start_cy", tr["cy"])
+
+    cfg = load_config()
+    entry_dir = getattr(cfg, "camera_entry_direction", "down")
+    direction = _classify_direction(dx, dy, entry_dir)
+
+    if direction is None:
+        logger.debug("Track %d ignorado: deslocamento insuficiente (dx=%.1f, dy=%.1f)", tid, dx, dy)
+        return
+
+    pid = str(tr.get("person_id") or f"face_{tid}")
+    age_est = tr.get("age_est")
+    gender_band = tr.get("gender_band")
 
     try:
-        ingest_event(EventIngestRequest(
-            person_id=pid,
-            direction="entrada",
-            age_estimate=age_est,
-            gender=gender_band,
-        ))
+        if direction == "entrada":
+            ingest_event(EventIngestRequest(
+                person_id=pid,
+                direction="entrada",
+                age_estimate=age_est,
+                gender=gender_band,
+            ))
+        else:
+            ingest_event(EventIngestRequest(person_id=pid, direction="saida"))
     except Exception as exc:
-        logger.warning("ingest entrada falhou (%s): %s", pid, exc)
-    return pid
-
-
-def _emit_saida(pid: str) -> None:
-    try:
-        ingest_event(EventIngestRequest(person_id=pid, direction="saida"))
-    except Exception as exc:
-        logger.warning("ingest saida falhou (%s): %s", pid, exc)
+        logger.warning("ingest %s falhou (%s): %s", direction, pid, exc)
 
 
 def get_detection_models_status() -> dict[str, Any]:

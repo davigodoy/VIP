@@ -255,7 +255,15 @@
               <input type="checkbox" name="live_detection_enabled" {% if config.live_detection_enabled %}checked{% endif %} />
               Deteccao facial automatica (24/7 se a camera estiver ligada; nao depende da agenda nem do preview)
             </label>
-            <p class="help full">Detecta <strong>rostos</strong> via <code>YuNet</code> (DNN, preferencial) com fallback <code>Haar</code>. Re-identificacao anonima via <code>SFace</code> (embedding neural 128-d) com fallback <code>DCT</code>. Com <strong>Estimar faixa etaria</strong> / <strong>Estimar genero</strong> ligados e os <strong>modelos DNN</strong> instalados (<code>data/opencv_dnn_models/</code>), cada <strong>entrada</strong> preenche idade/sexo aproximados. <strong>Reentrada</strong> (janela em minutos) compara com o mesmo <code>person_id</code> anonimo.</p>
+            <label>Direcao de entrada no frame
+              <select name="camera_entry_direction">
+                <option value="down" {% if config.camera_entry_direction == 'down' %}selected{% endif %}>Baixo (desce)</option>
+                <option value="up" {% if config.camera_entry_direction == 'up' %}selected{% endif %}>Cima (sobe)</option>
+                <option value="left" {% if config.camera_entry_direction == 'left' %}selected{% endif %}>Esquerda</option>
+                <option value="right" {% if config.camera_entry_direction == 'right' %}selected{% endif %}>Direita</option>
+              </select>
+            </label>
+            <p class="help full">Direcao em que as pessoas se movem no frame ao <strong>entrar</strong> no local. Ex.: se a camera esta no alto olhando para baixo e quem entra caminha para baixo no video, escolha <em>Baixo</em>. Movimentos na direcao oposta serao contados como <strong>saida</strong>.</p>
           </div>
         </section>
 

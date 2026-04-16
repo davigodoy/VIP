@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "camera_inference_height": 360,
     "camera_fps": 8,
     "live_detection_enabled": 0,
+    "camera_entry_direction": "down",
     "culto_antecedencia_min": 30,
     "culto_duracao_min": 150,
     "estimar_faixa_etaria": 1,
