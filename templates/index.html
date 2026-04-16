@@ -34,7 +34,10 @@
           <h1>Painel de Configuracao e Dashboard</h1>
           <p class="subtitle">Sistema leve, responsivo e orientado a operacao do culto</p>
         </div>
-        <button id="refresh-live" type="button" class="secondary">Atualizar agora</button>
+        <div class="topbar-actions">
+          <button id="toggle-compact" type="button" class="secondary">Textos longos: ocultos</button>
+          <button id="refresh-live" type="button" class="secondary">Atualizar agora</button>
+        </div>
       </div>
 
       <section id="sec-dashboard" class="card live-card">
@@ -379,6 +382,11 @@
             </tbody>
           </table>
         </div>
+        <div class="pager-controls" id="envolvimento-pager">
+          <button type="button" id="envolvimento-prev" class="secondary">Anterior</button>
+          <span id="envolvimento-page-status" class="help">Pagina 1</span>
+          <button type="button" id="envolvimento-next" class="secondary">Proxima</button>
+        </div>
       </section>
 
       <section id="sec-update" class="card">
@@ -406,24 +414,32 @@
           <progress id="update-progress" max="100" value="{{ update_status.progress_pct or 0 }}"></progress>
           <span id="update-progress-label">{{ update_status.progress_pct or 0 }}%</span>
         </div>
-        <div class="table-wrap table-wrap--stack">
-          <table>
-            <thead>
-              <tr>
-                <th>Inicio</th>
-                <th>Fim</th>
-                <th>Status</th>
-                <th>Passo</th>
-                <th>Mensagem</th>
-              </tr>
-            </thead>
-            <tbody id="update-runs-body">
-              <tr>
-                <td colspan="5">Carregando historico...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <details class="collapsible-history">
+          <summary>Ver historico de atualizacoes</summary>
+          <div class="table-wrap table-wrap--stack">
+            <table>
+              <thead>
+                <tr>
+                  <th>Inicio</th>
+                  <th>Fim</th>
+                  <th>Status</th>
+                  <th>Passo</th>
+                  <th>Mensagem</th>
+                </tr>
+              </thead>
+              <tbody id="update-runs-body">
+                <tr>
+                  <td colspan="5">Carregando historico...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pager-controls" id="update-pager">
+            <button type="button" id="update-prev" class="secondary">Anterior</button>
+            <span id="update-page-status" class="help">Pagina 1</span>
+            <button type="button" id="update-next" class="secondary">Proxima</button>
+          </div>
+        </details>
       </section>
 
       <section id="sec-operacional" class="card">
@@ -496,25 +512,33 @@
           <span id="reconcile-progress-label">0%</span>
         </div>
         <p id="reconcile-message" class="help"></p>
-        <div class="table-wrap table-wrap--stack">
-          <table>
-            <thead>
-              <tr>
-                <th>Data/hora</th>
-                <th>Status</th>
-                <th>Eventos</th>
-                <th>Cultos</th>
-                <th>Duracao (s)</th>
-                <th>Mensagem</th>
-              </tr>
-            </thead>
-            <tbody id="reconcile-runs-body">
-              <tr>
-                <td colspan="6">Carregando historico...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <details class="collapsible-history">
+          <summary>Ver historico de conciliacoes</summary>
+          <div class="table-wrap table-wrap--stack">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data/hora</th>
+                  <th>Status</th>
+                  <th>Eventos</th>
+                  <th>Cultos</th>
+                  <th>Duracao (s)</th>
+                  <th>Mensagem</th>
+                </tr>
+              </thead>
+              <tbody id="reconcile-runs-body">
+                <tr>
+                  <td colspan="6">Carregando historico...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pager-controls" id="reconcile-pager">
+            <button type="button" id="reconcile-prev" class="secondary">Anterior</button>
+            <span id="reconcile-page-status" class="help">Pagina 1</span>
+            <button type="button" id="reconcile-next" class="secondary">Proxima</button>
+          </div>
+        </details>
       </section>
 
       <section class="card">
@@ -550,38 +574,46 @@
 
       <section class="card">
         <h2>Historico de limpezas</h2>
-        <div class="table-wrap table-wrap--stack">
-          <table>
-            <thead>
-              <tr>
-                <th>Data/hora</th>
-                <th>Modo</th>
-                <th>Temp IDs</th>
-                <th>Profiles</th>
-                <th>Events</th>
-                <th>Agregados</th>
-                <th>Snapshots</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for run in runs %}
-              <tr>
-                <td data-label="Data/hora">{{ run.run_ts }}</td>
-                <td data-label="Modo">{% if run.dry_run %}Dry-run{% else %}Real{% endif %}</td>
-                <td data-label="Temp IDs">{{ run.deleted_or_would_delete.temp_tracks }}</td>
-                <td data-label="Profiles">{{ run.deleted_or_would_delete.profiles }}</td>
-                <td data-label="Events">{{ run.deleted_or_would_delete.events }}</td>
-                <td data-label="Agregados">{{ run.deleted_or_would_delete.aggregated_metrics }}</td>
-                <td data-label="Snapshots">{{ run.deleted_or_would_delete.snapshots }}</td>
-              </tr>
-              {% else %}
-              <tr>
-                <td colspan="7">Nenhuma execucao registrada ainda.</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+        <details class="collapsible-history">
+          <summary>Ver historico de limpezas</summary>
+          <div class="table-wrap table-wrap--stack">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data/hora</th>
+                  <th>Modo</th>
+                  <th>Temp IDs</th>
+                  <th>Profiles</th>
+                  <th>Events</th>
+                  <th>Agregados</th>
+                  <th>Snapshots</th>
+                </tr>
+              </thead>
+              <tbody id="cleanup-runs-body">
+                {% for run in runs %}
+                <tr>
+                  <td data-label="Data/hora">{{ run.run_ts }}</td>
+                  <td data-label="Modo">{% if run.dry_run %}Dry-run{% else %}Real{% endif %}</td>
+                  <td data-label="Temp IDs">{{ run.deleted_or_would_delete.temp_tracks }}</td>
+                  <td data-label="Profiles">{{ run.deleted_or_would_delete.profiles }}</td>
+                  <td data-label="Events">{{ run.deleted_or_would_delete.events }}</td>
+                  <td data-label="Agregados">{{ run.deleted_or_would_delete.aggregated_metrics }}</td>
+                  <td data-label="Snapshots">{{ run.deleted_or_would_delete.snapshots }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td colspan="7">Nenhuma execucao registrada ainda.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="pager-controls" id="cleanup-pager">
+            <button type="button" id="cleanup-prev" class="secondary">Anterior</button>
+            <span id="cleanup-page-status" class="help">Pagina 1</span>
+            <button type="button" id="cleanup-next" class="secondary">Proxima</button>
+          </div>
+        </details>
       </section>
     </section>
   </main>
@@ -673,6 +705,39 @@
     let occupancyChartRange;
     let ageChartRange;
     let genderChartRange;
+    const RUNS_PAGE_SIZE = 6;
+    const runPagerState = {
+      update: { rows: [], page: 1, size: RUNS_PAGE_SIZE },
+      reconcile: { rows: [], page: 1, size: RUNS_PAGE_SIZE },
+      cleanup: { rows: [], page: 1, size: RUNS_PAGE_SIZE },
+    };
+    let involvementPage = 1;
+
+    function getInvolvementPageSize() {
+      return window.matchMedia('(max-width: 768px)').matches ? 20 : 60;
+    }
+
+    function compactCell(text, maxLen = 120) {
+      const raw = String(text == null ? '' : text);
+      const safe = escHtml(raw);
+      if (raw.length <= maxLen) return safe || '-';
+      const shortSafe = escHtml(raw.slice(0, maxLen).trimEnd());
+      return `<span class="cell-ellipsis" title="${safe}">${shortSafe}&hellip;</span>`;
+    }
+
+    function renderRunsPager(kind) {
+      const state = runPagerState[kind];
+      if (!state) return;
+      const totalRows = state.rows.length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / state.size));
+      state.page = Math.max(1, Math.min(state.page, totalPages));
+      const status = document.getElementById(`${kind}-page-status`);
+      if (status) status.textContent = `Pagina ${state.page} de ${totalPages} (${totalRows} itens)`;
+      const prev = document.getElementById(`${kind}-prev`);
+      const next = document.getElementById(`${kind}-next`);
+      if (prev) prev.disabled = state.page <= 1;
+      if (next) next.disabled = state.page >= totalPages;
+    }
 
     function buildLineChart(ctx, labelA, labelB) {
       return new Chart(ctx, {
@@ -1321,19 +1386,29 @@
     function renderUpdateRuns(runs) {
       const body = document.getElementById('update-runs-body');
       if (!body) return;
-      if (!Array.isArray(runs) || runs.length === 0) {
+      const list = Array.isArray(runs) ? runs : [];
+      runPagerState.update.rows = list;
+      runPagerState.update.page = Math.min(
+        runPagerState.update.page,
+        Math.max(1, Math.ceil(list.length / runPagerState.update.size))
+      );
+      if (list.length === 0) {
         body.innerHTML = '<tr><td colspan="5">Nenhum update registrado.</td></tr>';
+        renderRunsPager('update');
         return;
       }
-      body.innerHTML = runs.map((run) => `
+      const start = (runPagerState.update.page - 1) * runPagerState.update.size;
+      const pageRows = list.slice(start, start + runPagerState.update.size);
+      body.innerHTML = pageRows.map((run) => `
         <tr>
-          <td data-label="Inicio">${run.started_at || '-'}</td>
-          <td data-label="Fim">${run.finished_at || '-'}</td>
-          <td data-label="Status">${run.status || '-'}</td>
-          <td data-label="Passo">${run.current_step || '-'}</td>
-          <td data-label="Mensagem">${run.message || '-'}</td>
+          <td data-label="Inicio">${compactCell(run.started_at || '-', 28)}</td>
+          <td data-label="Fim">${compactCell(run.finished_at || '-', 28)}</td>
+          <td data-label="Status">${compactCell(run.status || '-', 24)}</td>
+          <td data-label="Passo">${compactCell(run.current_step || '-', 28)}</td>
+          <td data-label="Mensagem">${compactCell(run.message || '-', 140)}</td>
         </tr>
       `).join('');
+      renderRunsPager('update');
     }
 
     function updateUpdateInfo(data) {
@@ -1360,7 +1435,7 @@
     }
 
     async function refreshUpdateHistory() {
-      const res = await fetch(vipUrl('api/update/history?limit=10'), { cache: 'no-store' });
+      const res = await fetch(vipUrl('api/update/history?limit=60'), { cache: 'no-store' });
       const data = await res.json();
       renderUpdateRuns(data.runs || []);
     }
@@ -1438,30 +1513,44 @@
     function renderReconcileRuns(runs) {
       const body = document.getElementById('reconcile-runs-body');
       if (!body) return;
-      if (!Array.isArray(runs) || runs.length === 0) {
+      const list = Array.isArray(runs) ? runs : [];
+      runPagerState.reconcile.rows = list;
+      runPagerState.reconcile.page = Math.min(
+        runPagerState.reconcile.page,
+        Math.max(1, Math.ceil(list.length / runPagerState.reconcile.size))
+      );
+      if (list.length === 0) {
         body.innerHTML = '<tr><td colspan="6">Nenhuma conciliacao registrada.</td></tr>';
+        renderRunsPager('reconcile');
         return;
       }
-      body.innerHTML = runs.map((run) => `
+      const start = (runPagerState.reconcile.page - 1) * runPagerState.reconcile.size;
+      const pageRows = list.slice(start, start + runPagerState.reconcile.size);
+      body.innerHTML = pageRows.map((run) => `
         <tr>
-          <td data-label="Data/hora">${run.run_ts || '-'}</td>
-          <td data-label="Status">${run.status || '-'}</td>
+          <td data-label="Data/hora">${compactCell(run.run_ts || '-', 28)}</td>
+          <td data-label="Status">${compactCell(run.status || '-', 24)}</td>
           <td data-label="Eventos">${run.processed_events ?? 0}</td>
           <td data-label="Cultos">${run.processed_services ?? 0}</td>
           <td data-label="Duracao (s)">${run.duration_sec ?? 0}</td>
-          <td data-label="Mensagem">${run.message || '-'}</td>
+          <td data-label="Mensagem">${compactCell(run.message || '-', 140)}</td>
         </tr>
       `).join('');
+      renderRunsPager('reconcile');
     }
 
     async function refreshReconciliation() {
       try {
-        const res = await fetch(vipUrl('api/reconciliation/status'), { cache: 'no-store' });
-        const data = await res.json();
+        const [statusRes, runsRes] = await Promise.all([
+          fetch(vipUrl('api/reconciliation/status'), { cache: 'no-store' }),
+          fetch(vipUrl('api/reconciliation/runs?limit=60'), { cache: 'no-store' }),
+        ]);
+        const data = await statusRes.json();
+        const runsData = await runsRes.json().catch(() => ({}));
         setText('reconcile-state', data.running ? 'Status: em execucao' : 'Status: ocioso');
         setReconcileProgress(data.progress_pct ?? 0);
         setText('reconcile-message', data.message || '');
-        renderReconcileRuns(data.recent_runs || []);
+        renderReconcileRuns(runsData.runs || data.recent_runs || []);
         const btn = document.getElementById('run-reconcile-now');
         if (btn) btn.disabled = !!data.running;
         const bBrowser = document.getElementById('run-reconcile-browser');
@@ -2205,23 +2294,35 @@
       }
     }
 
-    async function refreshEnvolvimento() {
+    async function refreshEnvolvimento(page = involvementPage) {
       const body = document.getElementById('envolvimento-body');
       const resumo = document.getElementById('envolvimento-resumo');
       const nota = document.getElementById('envolvimento-nota');
       if (!body) return;
+      const safePage = Math.max(1, Number(page) || 1);
+      const limit = getInvolvementPageSize();
+      const offset = (safePage - 1) * limit;
       try {
-        const res = await fetch(vipUrl('api/people/involvement?limit=300&offset=0'), { cache: 'no-store' });
+        const res = await fetch(vipUrl(`api/people/involvement?limit=${limit}&offset=${offset}`), { cache: 'no-store' });
         const d = await res.json();
         if (!res.ok) {
           body.innerHTML = `<tr><td colspan="4">Erro ao carregar (HTTP ${res.status})</td></tr>`;
           if (resumo) resumo.textContent = '';
           return;
         }
+        involvementPage = safePage;
         if (nota) nota.textContent = d.nota_identidade || '';
         const s = d.summary || {};
+        const totalItems = Number(d.total || 0);
+        const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+        const pageStatus = document.getElementById('envolvimento-page-status');
+        if (pageStatus) pageStatus.textContent = `Pagina ${involvementPage} de ${totalPages} (${totalItems} itens)`;
+        const prev = document.getElementById('envolvimento-prev');
+        const next = document.getElementById('envolvimento-next');
+        if (prev) prev.disabled = involvementPage <= 1;
+        if (next) next.disabled = involvementPage >= totalPages;
         if (resumo) {
-          resumo.textContent = `Janela ${d.janela_dias} dias | Visitante ${s.visitante ?? 0}, frequentador ${s.frequentador ?? 0}, membro ${s.membro ?? 0} (${d.total ?? 0} person_id). Lista: ${(d.people || []).length} linhas.`;
+          resumo.textContent = `Janela ${d.janela_dias} dias | Visitante ${s.visitante ?? 0}, frequentador ${s.frequentador ?? 0}, membro ${s.membro ?? 0} (${totalItems} person_id).`;
         }
         const rows = d.people || [];
         if (rows.length === 0) {
@@ -2241,7 +2342,107 @@
       }
     }
 
-    document.getElementById('envolvimento-refresh')?.addEventListener('click', refreshEnvolvimento);
+    function initCleanupHistoryPager() {
+      const body = document.getElementById('cleanup-runs-body');
+      if (!body) return;
+      const rows = Array.from(body.querySelectorAll('tr'));
+      const hasOnlyPlaceholder = rows.length === 1 && rows[0].querySelector('td[colspan]');
+      runPagerState.cleanup.rows = hasOnlyPlaceholder ? [] : rows.map((row) => row.outerHTML);
+      runPagerState.cleanup.page = 1;
+      renderCleanupHistoryPage();
+    }
+
+    function renderCleanupHistoryPage() {
+      const body = document.getElementById('cleanup-runs-body');
+      if (!body) return;
+      const list = runPagerState.cleanup.rows;
+      if (!Array.isArray(list) || list.length === 0) {
+        body.innerHTML = '<tr><td colspan="7">Nenhuma execucao registrada ainda.</td></tr>';
+        renderRunsPager('cleanup');
+        return;
+      }
+      const start = (runPagerState.cleanup.page - 1) * runPagerState.cleanup.size;
+      body.innerHTML = list.slice(start, start + runPagerState.cleanup.size).join('');
+      renderRunsPager('cleanup');
+    }
+
+    function initCompactMode() {
+      const btn = document.getElementById('toggle-compact');
+      if (!btn) return;
+      const root = document.body;
+      const apply = (on) => {
+        root.classList.toggle('compact-mode', !!on);
+        btn.textContent = `Textos longos: ${on ? 'ocultos' : 'visiveis'}`;
+      };
+      let modeOn = true;
+      try {
+        const saved = localStorage.getItem('vip_compact_mode');
+        modeOn = saved == null ? true : saved === '1';
+      } catch (e) {
+        modeOn = true;
+      }
+      apply(modeOn);
+      btn.addEventListener('click', () => {
+        modeOn = !modeOn;
+        try {
+          localStorage.setItem('vip_compact_mode', modeOn ? '1' : '0');
+        } catch (e) {
+          /* ignore */
+        }
+        apply(modeOn);
+      });
+    }
+
+    function markVerboseParagraphs() {
+      const lockedIds = new Set([
+        'live-detection-hint',
+        'preview-meta',
+        'preview-hint',
+        'camera-device-ack',
+        'envolvimento-resumo',
+        'envolvimento-nota',
+        'run-sync-result',
+        'reconcile-state',
+        'reconcile-message',
+        'update-state',
+        'upd-last-msg',
+      ]);
+      document.querySelectorAll('p.help, p.warn').forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.id && lockedIds.has(node.id)) return;
+        const textSize = (node.textContent || '').trim().length;
+        if (textSize >= 180) node.classList.add('verbose-copy');
+      });
+    }
+
+    document.getElementById('envolvimento-refresh')?.addEventListener('click', () => refreshEnvolvimento(1));
+    document.getElementById('envolvimento-prev')?.addEventListener('click', () => refreshEnvolvimento(involvementPage - 1));
+    document.getElementById('envolvimento-next')?.addEventListener('click', () => refreshEnvolvimento(involvementPage + 1));
+    document.getElementById('update-prev')?.addEventListener('click', () => {
+      runPagerState.update.page -= 1;
+      renderUpdateRuns(runPagerState.update.rows);
+    });
+    document.getElementById('update-next')?.addEventListener('click', () => {
+      runPagerState.update.page += 1;
+      renderUpdateRuns(runPagerState.update.rows);
+    });
+    document.getElementById('reconcile-prev')?.addEventListener('click', () => {
+      runPagerState.reconcile.page -= 1;
+      renderReconcileRuns(runPagerState.reconcile.rows);
+    });
+    document.getElementById('reconcile-next')?.addEventListener('click', () => {
+      runPagerState.reconcile.page += 1;
+      renderReconcileRuns(runPagerState.reconcile.rows);
+    });
+    document.getElementById('cleanup-prev')?.addEventListener('click', () => {
+      runPagerState.cleanup.page -= 1;
+      renderCleanupHistoryPage();
+    });
+    document.getElementById('cleanup-next')?.addEventListener('click', () => {
+      runPagerState.cleanup.page += 1;
+      renderCleanupHistoryPage();
+    });
+
     document.getElementById('save-envolvimento-config')?.addEventListener('click', saveInvolvementConfig);
 
     document.getElementById('vip-config-form')?.addEventListener('submit', (ev) => {
@@ -2254,7 +2455,10 @@
     document.getElementById('personas-reset-btn')?.addEventListener('click', runPersonasReset);
 
     consumeUrlToast();
+    markVerboseParagraphs();
+    initCompactMode();
     bindCameraDevices();
+    initCleanupHistoryPager();
     ensureCharts();
     initChartRangePanel();
     refreshLive();

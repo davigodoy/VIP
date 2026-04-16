@@ -85,6 +85,13 @@ body {
   gap: 12px;
 }
 
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 h1 {
   margin: 0 0 4px;
   font-size: clamp(1.35rem, 1.1rem + 1.5vw, 1.85rem);
@@ -377,6 +384,9 @@ textarea {
   grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 button {
@@ -503,6 +513,43 @@ button.danger {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.pager-controls .help {
+  margin: 0;
+}
+
+.collapsible-history {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafafa;
+}
+
+.collapsible-history > summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.cell-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.compact-mode .verbose-copy {
+  display: none;
 }
 
 .stack-form {
@@ -759,12 +806,25 @@ thead {
     align-items: stretch;
   }
 
-  .topbar .secondary {
+  .topbar-actions {
+    width: 100%;
+  }
+
+  .topbar-actions .secondary {
     width: 100%;
   }
 
   .status-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pager-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pager-controls button {
+    width: 100%;
   }
 }
 
