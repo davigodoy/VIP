@@ -454,6 +454,12 @@
               <li><strong>Deteccao facial (servidor):</strong> {% if camera_status.live_detection_enabled %}Sim{% else %}Nao{% endif %}</li>
             </ul>
           </div>
+          <div id="models-status-block">
+            <h3>Modelos DNN</h3>
+            <ul id="models-status-list">
+              <li>Carregando...</li>
+            </ul>
+          </div>
           <div>
             <h3>Auto start (boot)</h3>
             <ul>
@@ -2391,6 +2397,43 @@
       renderCleanupHistoryPage();
     });
 
+    async function refreshModelsStatus() {
+      const list = document.getElementById('models-status-list');
+      if (!list) return;
+      try {
+        const res = await fetch(vipUrl('api/detection/models'), { cache: 'no-store' });
+        if (!res.ok) { list.innerHTML = '<li>Erro ao carregar</li>'; return; }
+        const d = await res.json();
+        const det = d.detector || {};
+        const reid = d.reid || {};
+        const demo = d.demographics || {};
+        const icon = (obj) => {
+          if (obj.loaded) return '\u2705';
+          if (obj.present) return '\u23F3';
+          return '\u274C';
+        };
+        const label = (obj) => {
+          if (obj.loaded) return 'Ativo';
+          if (obj.present && obj.attempted) return 'Erro ao carregar';
+          if (obj.present) return 'Aguardando 1a deteccao';
+          return 'Arquivo ausente';
+        };
+        const yu = det.yunet || {};
+        const sf = reid.sface || {};
+        const ag = (demo.age) || {};
+        const ge = (demo.gender) || {};
+        const detAtivo = det.active || 'nenhum';
+        const reidAtivo = reid.active || 'nenhum';
+        list.innerHTML =
+          `<li><strong>Detector:</strong> ${detAtivo === 'yunet' ? 'YuNet (DNN)' : detAtivo === 'haar' ? 'Haar (fallback)' : detAtivo}</li>` +
+          `<li>${icon(yu)} <strong>YuNet</strong> &mdash; ${label(yu)}${yu.size_mb ? ' (' + yu.size_mb + ' MB)' : ''}</li>` +
+          `<li><strong>Re-id:</strong> ${reidAtivo === 'sface' ? 'SFace (neural)' : reidAtivo === 'dct' ? 'DCT (fallback)' : reidAtivo}</li>` +
+          `<li>${icon(sf)} <strong>SFace</strong> &mdash; ${label(sf)}${sf.size_mb ? ' (' + sf.size_mb + ' MB)' : ''}</li>` +
+          `<li>${icon(ag)} <strong>Idade</strong> &mdash; ${label(ag)}${ag.size_mb ? ' (' + ag.size_mb + ' MB)' : ''}</li>` +
+          `<li>${icon(ge)} <strong>Genero</strong> &mdash; ${label(ge)}${ge.size_mb ? ' (' + ge.size_mb + ' MB)' : ''}</li>`;
+      } catch { list.innerHTML = '<li>Indisponivel</li>'; }
+    }
+
     document.getElementById('save-envolvimento-config')?.addEventListener('click', saveInvolvementConfig);
 
     document.getElementById('vip-config-form')?.addEventListener('submit', (ev) => {
@@ -2412,6 +2455,7 @@
     refreshUpdates();
     refreshReconciliation();
     refreshEnvolvimento();
+    refreshModelsStatus();
     const VIP_DASH_LIVE_MS = 800;
     const VIP_DASH_CHARTS_MS = 2500;
     setInterval(refreshLive, VIP_DASH_LIVE_MS);
@@ -2419,6 +2463,7 @@
     setInterval(refreshUpdates, 4000);
     setInterval(refreshReconciliation, 2000);
     setInterval(refreshEnvolvimento, 60000);
+    setInterval(refreshModelsStatus, 15000);
   </script>
 </body>
 </html>

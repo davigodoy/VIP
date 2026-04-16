@@ -513,3 +513,59 @@ def _emit_saida(pid: str) -> None:
         ingest_event(EventIngestRequest(person_id=pid, direction="saida"))
     except Exception as exc:
         logger.warning("ingest saida falhou (%s): %s", pid, exc)
+
+
+def get_detection_models_status() -> dict[str, Any]:
+    """Status de cada modelo DNN: arquivo presente, carregado, e qual detector ativo."""
+    from .anonymous_face_reid import _sface, _sface_attempted
+    from .demographics_opencv import (
+        _age_attempted,
+        _age_net,
+        _gender_attempted,
+        _gender_net,
+        _load_ok_age,
+        _load_ok_gender,
+    )
+
+    def _file_info(name: str) -> dict[str, Any]:
+        p = _MODEL_DIR / name
+        present = p.is_file()
+        size_mb = round(p.stat().st_size / (1024 * 1024), 1) if present else None
+        return {"present": present, "size_mb": size_mb}
+
+    yunet_file = _file_info("face_detection_yunet_2023mar.onnx")
+    sface_file = _file_info("face_recognition_sface_2021dec.onnx")
+    age_file = _file_info("age_net.caffemodel")
+    gender_file = _file_info("gender_net.caffemodel")
+
+    return {
+        "detector": {
+            "active": _detector_type or "nenhum",
+            "yunet": {
+                **yunet_file,
+                "loaded": _yunet is not None,
+                "attempted": _yunet_attempted,
+            },
+            "haar_fallback": _detector_type == "haar",
+        },
+        "reid": {
+            "active": "sface" if _sface is not None else ("dct" if _sface_attempted else "nenhum"),
+            "sface": {
+                **sface_file,
+                "loaded": _sface is not None,
+                "attempted": _sface_attempted,
+            },
+        },
+        "demographics": {
+            "age": {
+                **age_file,
+                "loaded": _age_net is not None and _load_ok_age,
+                "attempted": _age_attempted,
+            },
+            "gender": {
+                **gender_file,
+                "loaded": _gender_net is not None and _load_ok_gender,
+                "attempted": _gender_attempted,
+            },
+        },
+    }

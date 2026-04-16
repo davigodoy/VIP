@@ -239,6 +239,13 @@ async def get_camera_status() -> JSONResponse:
     return JSONResponse(content=status)
 
 
+@app.get("/api/detection/models")
+async def api_detection_models() -> JSONResponse:
+    from .live_detection import get_detection_models_status
+
+    return JSONResponse(content=get_detection_models_status())
+
+
 @app.get("/api/camera/devices")
 async def api_camera_devices() -> JSONResponse:
     cameras = await asyncio.to_thread(list_detected_cameras)
