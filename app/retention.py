@@ -30,12 +30,12 @@ from .models import (
 # Agregados ao vivo e fila de pessoas: um unico registro (culto na agenda e so para exibicao/consulta).
 GLOBAL_STATS_ID = "__global__"
 
-_INVOLVEMENT_WHERE_ENTRADA = r"""
+_INVOLVEMENT_WHERE_ENTRADA = """
     event_type = 'entrada'
     AND temp_id IS NOT NULL
     AND TRIM(COALESCE(temp_id, '')) != ''
-    AND temp_id NOT LIKE 'hog\_%' ESCAPE '\\'
-    AND temp_id NOT LIKE 'face\_%' ESCAPE '\\'
+    AND temp_id NOT LIKE 'hog\\_%' ESCAPE '\\'
+    AND temp_id NOT LIKE 'face\\_%' ESCAPE '\\'
     AND LENGTH(COALESCE(event_ts, '')) >= 10
     AND substr(event_ts, 1, 10) >= date('now', ?)
 """

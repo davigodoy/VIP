@@ -428,7 +428,11 @@ async def api_personas_reset(payload: PersonasResetRequest) -> JSONResponse:
 async def api_live_metrics(
     culto_id: str | None = Query(default=None, description="Particao; omisso = culto ativo na agenda ou __global__"),
 ) -> JSONResponse:
-    return JSONResponse(content=get_live_metrics(culto_id=culto_id))
+    try:
+        return JSONResponse(content=get_live_metrics(culto_id=culto_id))
+    except Exception as exc:
+        logger.exception("Erro em /api/metrics/live")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @app.get("/api/people/involvement")
@@ -436,8 +440,12 @@ async def api_people_involvement(
     limit: int = Query(default=200, ge=1, le=2000),
     offset: int = Query(default=0, ge=0, le=500_000),
 ) -> JSONResponse:
-    data = await asyncio.to_thread(get_people_involvement, limit=limit, offset=offset)
-    return JSONResponse(content=data)
+    try:
+        data = await asyncio.to_thread(get_people_involvement, limit=limit, offset=offset)
+        return JSONResponse(content=data)
+    except Exception as exc:
+        logger.exception("Erro em /api/people/involvement")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @app.get("/api/metrics/charts")
@@ -464,14 +472,18 @@ async def api_metrics_charts(
             ) from exc
         if center_dt.tzinfo is None:
             center_dt = center_dt.replace(tzinfo=UTC)
-    return JSONResponse(
-        content=get_dashboard_charts(
-            culto_id=culto_id,
-            window_minutes=window_minutes,
-            bucket_seconds=bucket_seconds,
-            center=center_dt,
+    try:
+        return JSONResponse(
+            content=get_dashboard_charts(
+                culto_id=culto_id,
+                window_minutes=window_minutes,
+                bucket_seconds=bucket_seconds,
+                center=center_dt,
+            )
         )
-    )
+    except Exception as exc:
+        logger.exception("Erro em /api/metrics/charts")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @app.get("/api/reconciliation/status")
