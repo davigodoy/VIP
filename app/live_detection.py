@@ -90,6 +90,10 @@ _YUNET_MAX_H_RATIO = 0.80
 _FACE_PAD_RATIO = 0.30
 _MIN_CROP_PX = 40
 
+_diag_frame_count = 0
+_diag_detect_count = 0
+_diag_last_log = 0.0
+
 
 def _iou_xywh(
     a: tuple[float, float, float, float], b: tuple[float, float, float, float]
@@ -311,6 +315,19 @@ def on_frame_bgr(frame: np.ndarray) -> None:
         detections.append(
             (cx, cy, float(max(wi, hi)), float(xi), float(yi), float(wi), float(hi))
         )
+
+    global _diag_frame_count, _diag_detect_count, _diag_last_log
+    _diag_frame_count += 1
+    _diag_detect_count += len(detections)
+    now_mono = monotonic()
+    if now_mono - _diag_last_log > 10.0:
+        logger.info(
+            "DIAG frames=%d detections=%d tracks=%d exit_ring=%d (10s)",
+            _diag_frame_count, _diag_detect_count, len(_tracks), len(_exit_ring),
+        )
+        _diag_frame_count = 0
+        _diag_detect_count = 0
+        _diag_last_log = now_mono
 
     with _state_lock:
         _prune_exit_ring(monotonic())
