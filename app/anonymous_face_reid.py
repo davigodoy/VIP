@@ -50,7 +50,7 @@ _EMA_ALPHA = 0.10
 _EMA_MIN_SEEN = 2
 
 # --- Thresholds por tipo de descriptor (cosine similarity via dot product) ---
-_THRESHOLD_SFACE = 0.40
+_THRESHOLD_SFACE = 0.363
 _THRESHOLD_DCT = 0.86
 
 # DCT params
@@ -129,8 +129,36 @@ def _normalize(v: np.ndarray) -> np.ndarray:
     return v / n
 
 
+_yunet_reid: Any | None = None
+_yunet_reid_lock = threading.Lock()
+
+
+def _get_yunet_for_reid(w: int, h: int) -> Any | None:
+    """YuNet para deteccao de landmarks no crop (necessario para alignCrop do SFace)."""
+    global _yunet_reid
+    if not HAS_CV2 or cv2 is None:
+        return None
+    if not hasattr(cv2, "FaceDetectorYN"):
+        return None
+    model_path = _MODEL_DIR / "face_detection_yunet_2023mar.onnx"
+    if not model_path.is_file():
+        return None
+    with _yunet_reid_lock:
+        try:
+            if _yunet_reid is None:
+                _yunet_reid = cv2.FaceDetectorYN.create(
+                    str(model_path), "", (w, h),
+                    score_threshold=0.5, nms_threshold=0.3,
+                )
+            else:
+                _yunet_reid.setInputSize((w, h))
+            return _yunet_reid
+        except Exception:
+            return None
+
+
 def _sface_descriptor(face_bgr: np.ndarray) -> np.ndarray | None:
-    """128-dim neural face embedding via SFace."""
+    """128-dim neural face embedding via SFace com alinhamento por landmarks."""
     sface = _get_sface()
     if sface is None:
         return None
@@ -140,6 +168,14 @@ def _sface_descriptor(face_bgr: np.ndarray) -> np.ndarray | None:
     if h < _MIN_FACE_PX or w < _MIN_FACE_PX:
         return None
     try:
+        yunet = _get_yunet_for_reid(w, h)
+        if yunet is not None:
+            _, det = yunet.detect(face_bgr)
+            if det is not None and len(det) > 0:
+                aligned = sface.alignCrop(face_bgr, det[0])
+                emb = sface.feature(aligned)
+                vec = emb.flatten().astype(np.float32)
+                return _normalize(vec)
         emb = sface.feature(face_bgr)
         vec = emb.flatten().astype(np.float32)
         return _normalize(vec)

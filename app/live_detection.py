@@ -56,30 +56,31 @@ _next_tid = 1
 _last_cfg_off = True
 
 _exit_ring: list[
-    tuple[float, float, float, float, int, tuple[float, float, float, float], str | None]
+    tuple[float, float, float, float, float, float, int, tuple[float, float, float, float], str | None]
 ] = []
 _EXIT_RING_CAP = 64
-_REUSE_MAX_SEC = 45.0
-_REUSE_DIST = 70.0
-_REUSE_SZ_DIFF = 28.0
+_REUSE_MAX_SEC = 12.0
+_REUSE_DIST = 45.0
+_REUSE_SZ_DIFF = 22.0
 
-# --- Parametros de tracking (calibrados para rostos) ---
-_MATCH_DIST = 85.0
-_MIN_IOU_MATCH = 0.12
-_MAX_MISSES = 20
+# --- Parametros de tracking (rampa 1.8m, duplas/trios, fluxo bidirecional) ---
+_MATCH_DIST = 60.0
+_MIN_IOU_MATCH = 0.08
+_MAX_MISSES = 12
 _ENTRADA_MIN_FRAMES = 3
 _DETECT_MAX_SIDE = 480
+_VELOCITY_SMOOTH = 0.5
 
 # Haar fallback params
-_HAAR_SCALE_FACTOR = 1.12
-_HAAR_MIN_NEIGHBORS = 4
-_HAAR_MIN_W = 28
-_HAAR_MIN_H = 28
+_HAAR_SCALE_FACTOR = 1.10
+_HAAR_MIN_NEIGHBORS = 3
+_HAAR_MIN_W = 24
+_HAAR_MIN_H = 24
 _HAAR_MAX_W_RATIO = 0.70
 _HAAR_MAX_H_RATIO = 0.80
 
-# YuNet params
-_YUNET_SCORE_THRESHOLD = 0.65
+# YuNet params — threshold baixo para rostos em angulo (rampa, perfil 3/4)
+_YUNET_SCORE_THRESHOLD = 0.50
 _YUNET_NMS_THRESHOLD = 0.3
 _YUNET_MAX_W_RATIO = 0.70
 _YUNET_MAX_H_RATIO = 0.80
@@ -319,6 +320,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
         used_j: set[int] = set()
         match_tid_to_j: dict[int, int] = {}
 
+        # Fase 1: matching por IoU (melhor para frames consecutivos)
         scored: list[tuple[float, float, int, int]] = []
         for tid in track_ids:
             tr = _tracks[tid]
@@ -342,25 +344,32 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             used_j.add(j)
             match_tid_to_j[tid] = j
 
+        # Fase 2: matching por distancia a posicao PREVISTA (velocity prediction)
+        # Essencial para pessoas caminhando — preve onde o rosto estara
         for tid in track_ids:
             if tid in match_tid_to_j:
                 continue
             tr = _tracks.get(tid)
             if tr is None:
                 continue
+            pred_cx = tr["cx"] + tr.get("vx", 0.0)
+            pred_cy = tr["cy"] + tr.get("vy", 0.0)
             best_i: int | None = None
-            best_d = _MATCH_DIST + 1.0
+            best_score = _MATCH_DIST + 1.0
             for j, det in enumerate(detections):
                 if j in used_j:
                     continue
-                d = math.hypot(det[0] - tr["cx"], det[1] - tr["cy"])
-                if d < best_d:
-                    best_d = d
+                d = math.hypot(det[0] - pred_cx, det[1] - pred_cy)
+                sz_diff = abs(det[2] - tr["sz"])
+                cost = d + sz_diff * 0.5
+                if cost < best_score:
+                    best_score = cost
                     best_i = j
-            if best_i is not None and best_d <= _MATCH_DIST:
+            if best_i is not None and best_score <= _MATCH_DIST:
                 used_j.add(best_i)
                 match_tid_to_j[tid] = best_i
 
+        # Atualiza tracks matched
         for tid in track_ids:
             tr = _tracks.get(tid)
             if tr is None:
@@ -368,12 +377,19 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             if tid in match_tid_to_j:
                 j = match_tid_to_j[tid]
                 cx, cy, sz, xs, ys, rws, rhs = detections[j]
+
+                # Atualiza velocidade (EMA suavizada)
+                new_vx = cx - tr["cx"]
+                new_vy = cy - tr["cy"]
+                a = _VELOCITY_SMOOTH
+                tr["vx"] = a * new_vx + (1.0 - a) * tr.get("vx", 0.0)
+                tr["vy"] = a * new_vy + (1.0 - a) * tr.get("vy", 0.0)
+
                 tr["cx"], tr["cy"], tr["sz"] = cx, cy, sz
                 tr["rect_small"] = (xs, ys, rws, rhs)
                 tr["misses"] = 0
                 tr["stable_frames"] = int(tr.get("stable_frames", 0)) + 1
 
-                # Acumula melhor crop enquanto estabiliza
                 if not tr.get("entrada_commit"):
                     crop = _padded_face_crop(
                         frame, (xs, ys, rws, rhs),
@@ -394,7 +410,6 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                     best = tr.get("best_crop")
                     if best is not None:
                         enter_best_crop[tid] = best
-                    # Libera referencia ao crop (nao precisa mais)
                     tr.pop("best_crop", None)
                     tr.pop("best_crop_area", None)
             else:
@@ -409,6 +424,8 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                                 float(tr["cx"]),
                                 float(tr["cy"]),
                                 float(tr["sz"]),
+                                float(tr.get("vx", 0.0)),
+                                float(tr.get("vy", 0.0)),
                                 tid,
                                 (float(rs[0]), float(rs[1]), float(rs[2]), float(rs[3])),
                                 str(tr.get("person_id") or ""),
@@ -427,12 +444,15 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             reuse_tid: int | None = None
             eperson: str | None = None
             for ri in range(len(_exit_ring) - 1, -1, -1):
-                ts, ecx, ecy, esz, etid, _erect, ep = _exit_ring[ri]
+                ts, ecx, ecy, esz, evx, evy, etid, _erect, ep = _exit_ring[ri]
                 if nowm - ts > _REUSE_MAX_SEC:
                     continue
                 if abs(sz - esz) > _REUSE_SZ_DIFF:
                     continue
-                if math.hypot(cx - ecx, cy - ecy) > _REUSE_DIST:
+                dt = nowm - ts
+                pred_ex = ecx + evx * min(dt * 8.0, 40.0)
+                pred_ey = ecy + evy * min(dt * 8.0, 40.0)
+                if math.hypot(cx - pred_ex, cy - pred_ey) > _REUSE_DIST:
                     continue
                 reuse_tid = etid
                 eperson = ep
@@ -445,7 +465,6 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 tid = _next_tid
                 _next_tid += 1
 
-            # Primeiro crop para o novo track
             initial_crop = _padded_face_crop(
                 frame, rect, small_w, small_h, w, h
             )
@@ -453,6 +472,8 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "cx": cx,
                 "cy": cy,
                 "sz": sz,
+                "vx": 0.0,
+                "vy": 0.0,
                 "misses": 0,
                 "rect_small": rect,
                 "stable_frames": 0,
