@@ -195,13 +195,23 @@ def _detect_faces_yunet(
     max_w = int(max(1, img_w * _YUNET_MAX_W_RATIO))
     max_h = int(max(1, img_h * _YUNET_MAX_H_RATIO))
     result: list[list[int]] = []
+    filtered_small = 0
+    filtered_big = 0
     for face in faces:
         x, y, w, h = int(face[0]), int(face[1]), int(face[2]), int(face[3])
+        score = float(face[14]) if len(face) > 14 else -1.0
         if w < _HAAR_MIN_W or h < _HAAR_MIN_H:
+            filtered_small += 1
             continue
         if w > max_w or h > max_h:
+            filtered_big += 1
             continue
         result.append([x, y, w, h])
+    if len(faces) > 0 and len(result) == 0:
+        logger.warning(
+            "YuNet raw=%d filtered(small=%d big=%d) img=%dx%d",
+            len(faces), filtered_small, filtered_big, img_w, img_h,
+        )
     return result
 
 
@@ -322,8 +332,9 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     now_mono = monotonic()
     if now_mono - _diag_last_log > 10.0:
         logger.warning(
-            "DIAG frames=%d detections=%d tracks=%d exit_ring=%d (10s)",
+            "DIAG frames=%d det=%d tracks=%d ring=%d raw=%dx%d->%dx%d (10s)",
             _diag_frame_count, _diag_detect_count, len(_tracks), len(_exit_ring),
+            w, h, small_w, small_h,
         )
         _diag_frame_count = 0
         _diag_detect_count = 0
