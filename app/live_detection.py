@@ -67,8 +67,8 @@ _REUSE_SZ_DIFF = 22.0
 # --- Parametros de tracking (rampa 1.8m, duplas/trios, fluxo bidirecional) ---
 _MATCH_DIST = 60.0
 _MIN_IOU_MATCH = 0.08
-_MAX_MISSES = 12
-_REID_MIN_FRAMES = 3
+_MAX_MISSES = 25
+_REID_MIN_FRAMES = 2
 _DETECT_MAX_SIDE = 480
 _VELOCITY_SMOOTH = 0.5
 _MIN_DISPLACEMENT = 8.0
@@ -82,7 +82,7 @@ _HAAR_MAX_W_RATIO = 0.70
 _HAAR_MAX_H_RATIO = 0.80
 
 # YuNet params — threshold baixo para rostos em angulo (rampa, perfil 3/4)
-_YUNET_SCORE_THRESHOLD = 0.50
+_YUNET_SCORE_THRESHOLD = 0.40
 _YUNET_NMS_THRESHOLD = 0.3
 _YUNET_MAX_W_RATIO = 0.70
 _YUNET_MAX_H_RATIO = 0.80
@@ -386,7 +386,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 tr["cx"], tr["cy"], tr["sz"] = cx, cy, sz
                 tr["rect_small"] = (xs, ys, rws, rhs)
                 tr["misses"] = 0
-                tr["stable_frames"] = int(tr.get("stable_frames", 0)) + 1
+                tr["total_hits"] = int(tr.get("total_hits", 0)) + 1
 
                 if not tr.get("reid_done"):
                     crop = _padded_face_crop(
@@ -401,7 +401,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
 
                 if (
                     not tr.get("reid_done")
-                    and tr["stable_frames"] >= _REID_MIN_FRAMES
+                    and tr["total_hits"] >= _REID_MIN_FRAMES
                 ):
                     tr["reid_done"] = True
                     best = tr.get("best_crop")
@@ -411,7 +411,6 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                     tr.pop("best_crop_area", None)
             else:
                 tr["misses"] = int(tr["misses"]) + 1
-                tr["stable_frames"] = 0
                 if tr["misses"] >= _MAX_MISSES:
                     if tr.get("reid_done"):
                         rs = tr.get("rect_small")
@@ -475,7 +474,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "vy": 0.0,
                 "misses": 0,
                 "rect_small": rect,
-                "stable_frames": 0,
+                "total_hits": 0,
                 "reid_done": is_reuse,
                 "event_emitted": is_reuse,
                 "person_id": eperson if is_reuse else None,
@@ -583,7 +582,7 @@ def get_tracking_debug() -> dict[str, Any]:
                 "tid": tid,
                 "cx": round(tr["cx"], 1),
                 "cy": round(tr["cy"], 1),
-                "frames": tr.get("stable_frames", 0),
+                "hits": tr.get("total_hits", 0),
                 "misses": tr.get("misses", 0),
                 "reid_done": bool(tr.get("reid_done")),
                 "event_emitted": bool(tr.get("event_emitted")),
