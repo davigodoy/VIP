@@ -1,11 +1,10 @@
 """
-Deteccao continua de pessoas (OpenCV HOG) no mesmo fluxo da camera que o preview.
+Deteccao continua por rosto (OpenCV Haar Cascade) no mesmo fluxo da camera.
 Gera entradas/saidas via ingest_event — independente do browser aberto.
 
-Emparelhamento IoU + distancia reduz troca de id. Reutilizacao de `hog_<tid>` apos
-saida recente (anel) aproxima unicos. **Entrada** só depois de varios frames seguidos
-com deteccao; **saida** só se já houve entrada — evita par entrada/saida fantasma
-quando o HOG oscila ao aparecer a pessoa.
+Emparelhamento IoU + distancia reduz troca de id. Reutilizacao de track recente
+aproxima unicos. **Entrada** só depois de varios frames seguidos com deteccao;
+**saida** só se já houve entrada — evita par entrada/saida fantasma.
 """
 from __future__ import annotations
 
@@ -33,14 +32,14 @@ except ImportError:
     cv2 = None  # type: ignore[assignment]
     HAS_CV2 = False
 
-_hog: Any | None = None
-_hog_lock = threading.Lock()
+_face_cascade: Any | None = None
+_face_lock = threading.Lock()
 
 _state_lock = threading.Lock()
 _tracks: dict[int, dict[str, Any]] = {}
 _next_tid = 1
 _last_cfg_off = True
-# Saidas recentes (flicker): reutilizar o mesmo hog_<tid> se voltar a aparecer perto
+# Saidas recentes (flicker): reutilizar o mesmo track se voltar a aparecer perto
 _exit_ring: list[
     tuple[
         float,
@@ -61,24 +60,19 @@ _REUSE_SZ_DIFF = 48.0
 _MATCH_DIST = 130.0
 # Sobreposicao minima (IoU) para considerar a mesma pessoa quando o centro salta
 _MIN_IOU_MATCH = 0.08
-# Frames sem deteccao antes de contar saida (com ~8 FPS ~4s — reduz saidas por flicker do HOG)
-_MAX_MISSES = 32
+# Frames sem deteccao antes de contar saida (~8 FPS => ~3s)
+_MAX_MISSES = 24
 # Frames seguidos com deteccao antes de gravar entrada (evita entrada+saida fantasma no mesmo instante)
-_ENTRADA_MIN_FRAMES = 3
-# Largura maxima do lado maior ao correr HOG (velocidade no Pi)
+_ENTRADA_MIN_FRAMES = 2
+# Largura maxima do lado maior ao correr detector (velocidade no Pi)
 _DETECT_MAX_SIDE = 520
-# > 0 reduz falsos positivos (0.0 aceita quase tudo). Subir se ainda houver fantasmas.
-_HOG_HIT_THRESHOLD = 0.28
-# Stride maior = menos sensibilidade a ruido, um pouco mais rapido no Pi
-_HOG_WIN_STRIDE = 16
-# Caixas ridiculamente pequenas (sombras, artefactos) ignoradas no frame small
-_HOG_MIN_W = 28
-_HOG_MIN_H = 56
-# Silhueta vertical tipica de pessoa em pe; fora disto o HOG costuma errar
-_HOG_MIN_AR = 1.15
-_HOG_MAX_AR = 4.2
-# Fundir deteccoes sobrepostas (mesma pessoa, varias caixas)
-_HOG_GROUP_EPS = 0.35
+# Haar params para deteccao facial.
+_FACE_SCALE_FACTOR = 1.10
+_FACE_MIN_NEIGHBORS = 4
+_FACE_MIN_W = 22
+_FACE_MIN_H = 22
+_FACE_MAX_W_RATIO = 0.75
+_FACE_MAX_H_RATIO = 0.85
 
 
 def _iou_xywh(
@@ -106,16 +100,50 @@ def _prune_exit_ring(now_m: float) -> None:
         _exit_ring.pop(0)
 
 
-def _get_hog() -> Any | None:
-    global _hog
+def _get_face_cascade() -> Any | None:
+    global _face_cascade
     if not HAS_CV2 or cv2 is None:
         return None
-    with _hog_lock:
-        if _hog is None:
-            hog = cv2.HOGDescriptor()
-            hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-            _hog = hog
-        return _hog
+    with _face_lock:
+        if _face_cascade is None:
+            path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            casc = cv2.CascadeClassifier(path)
+            if casc.empty():
+                logger.warning("Haar cascade de rosto invalida: %s", path)
+                return None
+            _face_cascade = casc
+        return _face_cascade
+
+
+def _detect_faces(
+    cascade: Any,
+    gray: np.ndarray,
+) -> list[list[int]]:
+    try:
+        out = cascade.detectMultiScale(
+            gray,
+            scaleFactor=_FACE_SCALE_FACTOR,
+            minNeighbors=_FACE_MIN_NEIGHBORS,
+            minSize=(_FACE_MIN_W, _FACE_MIN_H),
+        )
+    except Exception as exc:
+        logger.warning("Face detectMultiScale falhou: %s", exc)
+        return []
+
+    rects = out
+    rect_list: list[list[int]] = []
+    if rects is not None and len(rects) > 0:
+        h, w = gray.shape[:2]
+        max_w = int(max(1, w * _FACE_MAX_W_RATIO))
+        max_h = int(max(1, h * _FACE_MAX_H_RATIO))
+        for (_i, (x, y, rw, rh)) in enumerate(rects):
+            xi, yi, wi, hi = int(x), int(y), int(rw), int(rh)
+            if wi < _FACE_MIN_W or hi < _FACE_MIN_H:
+                continue
+            if wi > max_w or hi > max_h:
+                continue
+            rect_list.append([xi, yi, wi, hi])
+    return rect_list
 
 
 def reset_tracks() -> None:
@@ -141,8 +169,8 @@ def on_frame_bgr(frame: np.ndarray) -> None:
         return
     _last_cfg_off = False
 
-    hog = _get_hog()
-    if hog is None:
+    cascade = _get_face_cascade()
+    if cascade is None:
         return
 
     h, w = frame.shape[:2]
@@ -153,36 +181,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
     small = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
 
-    try:
-        out = hog.detectMultiScale(
-            gray,
-            winStride=(_HOG_WIN_STRIDE, _HOG_WIN_STRIDE),
-            padding=(16, 16),
-            scale=1.06,
-            hitThreshold=_HOG_HIT_THRESHOLD,
-        )
-    except Exception as exc:
-        logger.warning("HOG detectMultiScale falhou: %s", exc)
-        return
-
-    if isinstance(out, tuple) and len(out) >= 2:
-        rects = out[0]
-    else:
-        rects = out
-
-    rect_list: list[list[int]] = []
-    if rects is not None and len(rects) > 0:
-        for (_i, (x, y, rw, rh)) in enumerate(rects):
-            xi, yi, wi, hi = int(x), int(y), int(rw), int(rh)
-            if wi < _HOG_MIN_W or hi < _HOG_MIN_H:
-                continue
-            ar = hi / float(max(1, wi))
-            if ar < _HOG_MIN_AR or ar > _HOG_MAX_AR:
-                continue
-            rect_list.append([xi, yi, wi, hi])
-
-    if rect_list:
-        cv2.groupRectangles(rect_list, groupThreshold=1, eps=_HOG_GROUP_EPS)
+    rect_list = _detect_faces(cascade, gray)
 
     # (cx, cy, sz, x, y, rw, rh) em coordenadas do frame redimensionado (small)
     detections: list[tuple[float, float, float, float, float, float, float]] = []
@@ -287,7 +286,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                             )
                         while len(_exit_ring) > _EXIT_RING_CAP:
                             _exit_ring.pop(0)
-                        exit_pid = str(tr.get("person_id") or f"hog_{tid}")
+                        exit_pid = str(tr.get("person_id") or f"face_{tid}")
                         to_exit.append((tid, exit_pid))
                     del _tracks[tid]
 
@@ -346,7 +345,7 @@ def _emit_entrada(
     full_h: int,
     rect_small: tuple[float, float, float, float] | None,
 ) -> str:
-    pid = f"hog_{track_id}"
+    pid = f"face_{track_id}"
     cfg = load_config()
     want_age = bool(cfg.estimar_faixa_etaria)
     want_gender = bool(cfg.estimar_genero)
@@ -368,11 +367,15 @@ def _emit_entrada(
             y1 = max(y0 + 1, min(y1, full_h))
             crop = frame_bgr[y0:y1, x0:x1]
             if crop.size > 0:
-                face_crop = extract_largest_face_crop(crop)
-                if face_crop is not None:
-                    anon_id = resolve_anonymous_person_id(face_crop)
-                    if anon_id:
-                        pid = anon_id
+                anon_id = resolve_anonymous_person_id(crop)
+                if anon_id:
+                    pid = anon_id
+                else:
+                    face_crop = extract_largest_face_crop(crop)
+                    if face_crop is not None:
+                        anon_id = resolve_anonymous_person_id(face_crop)
+                        if anon_id:
+                            pid = anon_id
                 if want_age or want_gender:
                     age_est, g = estimate_demographics_optional(
                         crop, want_age=want_age, want_gender=want_gender

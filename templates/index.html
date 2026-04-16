@@ -438,7 +438,7 @@
               <li><strong>Habilitada:</strong> {% if camera_status.camera_enabled %}Sim{% else %}Nao{% endif %}</li>
               <li><strong>Resolucao:</strong> {{ camera_status.inference_resolution }}</li>
               <li><strong>FPS:</strong> {{ camera_status.camera_fps }}</li>
-              <li><strong>Deteccao HOG (servidor):</strong> {% if camera_status.live_detection_enabled %}Sim{% else %}Nao{% endif %}</li>
+              <li><strong>Deteccao facial (servidor):</strong> {% if camera_status.live_detection_enabled %}Sim{% else %}Nao{% endif %}</li>
             </ul>
           </div>
           <div>
@@ -991,7 +991,7 @@
         const scope = data.stats_scope === 'culto' ? 'totais do culto na agenda' : 'totais globais';
         let statusMsg;
         if (data.scheduled === false) {
-          statusMsg = `Online — ${scope} (fora da janela na agenda; deteccao HOG nao depende disso)`;
+          statusMsg = `Online — ${scope} (fora da janela na agenda; deteccao facial nao depende disso)`;
         } else if (data.global_stats_fallback === true) {
           statusMsg = `Online — ${scope} — particao do culto na agenda ainda sem agregados; a mostrar totais globais (ex.: entradas fora do horario na agenda).`;
         } else {
@@ -1004,7 +1004,7 @@
           if (!cd.opencv_installed) {
             detHint.hidden = false;
             detHint.textContent =
-              'OpenCV nao instalado no servidor — deteccao HOG indisponivel. Instale opencv-python-headless no venv e reinicie.';
+              'OpenCV nao instalado no servidor — deteccao facial indisponivel. Instale opencv-python-headless no venv e reinicie.';
           } else if (!cd.camera_enabled) {
             detHint.hidden = false;
             detHint.textContent =
@@ -1012,7 +1012,7 @@
           } else if (!cd.live_detection_enabled) {
             detHint.hidden = false;
             detHint.textContent =
-              'Deteccao automatica (HOG) esta DESLIGADA — por isso os numeros nao sobem ao passar na camera. Ative o checkbox nesta pagina (Configuracao da camera) e grave; nao e preciso abrir o preview.';
+              'Deteccao automatica facial esta DESLIGADA — por isso os numeros nao sobem ao passar na camera. Ative o checkbox nesta pagina (Configuracao da camera) e grave; nao e preciso abrir o preview.';
           } else {
             detHint.hidden = true;
           }

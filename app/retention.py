@@ -35,6 +35,7 @@ _INVOLVEMENT_WHERE_ENTRADA = r"""
     AND temp_id IS NOT NULL
     AND TRIM(COALESCE(temp_id, '')) != ''
     AND temp_id NOT LIKE 'hog\_%' ESCAPE '\\'
+    AND temp_id NOT LIKE 'face\_%' ESCAPE '\\'
     AND LENGTH(COALESCE(event_ts, '')) >= 10
     AND substr(event_ts, 1, 10) >= date('now', ?)
 """
@@ -2247,7 +2248,7 @@ def ingest_event(payload: EventIngestRequest) -> dict[str, Any]:
 
 
 def _camera_detection_status() -> dict[str, Any]:
-    """Estado da captura/HOG para o dashboard (a deteccao nao depende da agenda)."""
+    """Estado da captura/deteccao facial para o dashboard (independe da agenda)."""
     cfg = load_config()
     opencv = False
     try:
