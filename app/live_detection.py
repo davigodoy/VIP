@@ -64,6 +64,9 @@ _REUSE_MAX_SEC = 12.0
 _REUSE_DIST = 45.0
 _REUSE_SZ_DIFF = 22.0
 
+_recent_events: dict[str, float] = {}
+_RECENT_EVENT_WINDOW = 120.0
+
 # --- Parametros de tracking (rampa 1.8m, duplas/trios, fluxo bidirecional) ---
 _MATCH_DIST = 60.0
 _MIN_IOU_MATCH = 0.08
@@ -117,6 +120,12 @@ def _prune_exit_ring(now_m: float) -> None:
     _exit_ring = [r for r in _exit_ring if now_m - r[0] <= keep]
     while len(_exit_ring) > _EXIT_RING_CAP:
         _exit_ring.pop(0)
+
+
+def _prune_recent_events(now_m: float) -> None:
+    expired = [k for k, ts in _recent_events.items() if now_m - ts > _RECENT_EVENT_WINDOW]
+    for k in expired:
+        del _recent_events[k]
 
 
 def _get_clahe() -> Any | None:
@@ -583,6 +592,14 @@ def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
         logger.debug("Track %d parado (dx=%.1f, dy=%.1f) -> entrada (presenca)", tid, dx, dy)
 
     pid = str(tr.get("person_id") or f"face_{tid}")
+
+    now = monotonic()
+    _prune_recent_events(now)
+    if pid in _recent_events:
+        logger.debug("Track %d pid=%s ja emitido ha %.0fs — skip", tid, pid, now - _recent_events[pid])
+        tr["event_emitted"] = True
+        return
+
     age_est = tr.get("age_est")
     gender_band = tr.get("gender_band")
 
@@ -597,6 +614,7 @@ def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
         else:
             ingest_event(EventIngestRequest(person_id=pid, direction="saida"))
         tr["event_emitted"] = True
+        _recent_events[pid] = now
     except Exception as exc:
         logger.warning("ingest %s falhou (%s): %s", direction, pid, exc)
 
