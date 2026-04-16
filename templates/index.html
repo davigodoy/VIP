@@ -35,7 +35,6 @@
           <p class="subtitle">Sistema leve, responsivo e orientado a operacao do culto</p>
         </div>
         <div class="topbar-actions">
-          <button id="toggle-compact" type="button" class="secondary">Textos longos: ocultos</button>
           <button id="refresh-live" type="button" class="secondary">Atualizar agora</button>
         </div>
       </div>
@@ -2366,55 +2365,6 @@
       renderRunsPager('cleanup');
     }
 
-    function initCompactMode() {
-      const btn = document.getElementById('toggle-compact');
-      if (!btn) return;
-      const root = document.body;
-      const apply = (on) => {
-        root.classList.toggle('compact-mode', !!on);
-        btn.textContent = `Textos longos: ${on ? 'ocultos' : 'visiveis'}`;
-      };
-      let modeOn = true;
-      try {
-        const saved = localStorage.getItem('vip_compact_mode');
-        modeOn = saved == null ? true : saved === '1';
-      } catch (e) {
-        modeOn = true;
-      }
-      apply(modeOn);
-      btn.addEventListener('click', () => {
-        modeOn = !modeOn;
-        try {
-          localStorage.setItem('vip_compact_mode', modeOn ? '1' : '0');
-        } catch (e) {
-          /* ignore */
-        }
-        apply(modeOn);
-      });
-    }
-
-    function markVerboseParagraphs() {
-      const lockedIds = new Set([
-        'live-detection-hint',
-        'preview-meta',
-        'preview-hint',
-        'camera-device-ack',
-        'envolvimento-resumo',
-        'envolvimento-nota',
-        'run-sync-result',
-        'reconcile-state',
-        'reconcile-message',
-        'update-state',
-        'upd-last-msg',
-      ]);
-      document.querySelectorAll('p.help, p.warn').forEach((node) => {
-        if (!(node instanceof HTMLElement)) return;
-        if (node.id && lockedIds.has(node.id)) return;
-        const textSize = (node.textContent || '').trim().length;
-        if (textSize >= 180) node.classList.add('verbose-copy');
-      });
-    }
-
     document.getElementById('envolvimento-refresh')?.addEventListener('click', () => refreshEnvolvimento(1));
     document.getElementById('envolvimento-prev')?.addEventListener('click', () => refreshEnvolvimento(involvementPage - 1));
     document.getElementById('envolvimento-next')?.addEventListener('click', () => refreshEnvolvimento(involvementPage + 1));
@@ -2455,8 +2405,6 @@
     document.getElementById('personas-reset-btn')?.addEventListener('click', runPersonasReset);
 
     consumeUrlToast();
-    markVerboseParagraphs();
-    initCompactMode();
     bindCameraDevices();
     initCleanupHistoryPager();
     ensureCharts();
