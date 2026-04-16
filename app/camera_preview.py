@@ -250,7 +250,7 @@ def _ensure_thread() -> None:
 
 
 def ensure_background_capture() -> None:
-    """Garante thread de captura (preview e/ou deteccao HOG em background)."""
+    """Garante thread de captura (preview e/ou deteccao facial em background)."""
     if HAS_CV2:
         _ensure_thread()
 

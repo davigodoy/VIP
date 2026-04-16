@@ -120,7 +120,7 @@ else
   sudo -u "$RUN_USER" "$PYTHON_BIN" -m pip install --break-system-packages -r "$INSTALL_DIR/requirements.txt"
 fi
 
-echo "[3/6] Modelos DNN (idade/sexo no HOG)..."
+echo "[3/6] Modelos DNN (deteccao facial, re-id, idade/sexo)..."
 DL_SCRIPT="$INSTALL_DIR/scripts/download_demographics_models.sh"
 if [[ -f "$DL_SCRIPT" ]]; then
   chmod +x "$DL_SCRIPT" 2>/dev/null || true
@@ -128,10 +128,10 @@ if [[ -f "$DL_SCRIPT" ]]; then
     :
   else
     echo "Aviso: download dos modelos DNN falhou (rede indisponivel?). O VIP sobe na mesma;" \
-      "HOG sem idade/sexo ate correr: sudo -u $RUN_USER $DL_SCRIPT"
+      "deteccao facial sem YuNet/SFace/idade/sexo ate correr: sudo -u $RUN_USER $DL_SCRIPT"
   fi
 else
-  echo "Aviso: nao encontrado $DL_SCRIPT (demografia HOG indisponivel)."
+  echo "Aviso: nao encontrado $DL_SCRIPT (modelos DNN indisponiveis)."
 fi
 
 echo "[4/6] Verificando sintaxe Python..."

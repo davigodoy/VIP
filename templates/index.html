@@ -41,8 +41,8 @@
 
       <section id="sec-dashboard" class="card live-card">
         <h2>Dashboard em tempo real</h2>
-        <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong>. A <strong>agenda nao liga nem desliga</strong> a deteccao: com <strong>Deteccao automatica</strong> ativa na camera, o HOG corre <strong>a qualquer hora</strong> (culto e so rotulo / particao dos totais). Entradas tambem podem vir de um edge via <code>POST /api/events/ingest</code>.</p>
-        <p class="warn">A deteccao integrada (HOG) e aproximada: pode gerar <strong>falsos positivos</strong> e usa CPU no Pi. Para contagem confiavel em producao, prefira um modelo dedicado no edge enviando <code>ingest</code>. Por defeito a deteccao automatica vem <strong>desligada</strong> — marque o checkbox em Configuracao da camera e clique em gravar; sem isso e sem edge, os numeros permanecem em zero.</p>
+        <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong>. A <strong>agenda nao liga nem desliga</strong> a deteccao: com <strong>Deteccao facial</strong> ativa na camera, a deteccao corre <strong>24/7</strong> (culto e so rotulo / particao dos totais). Entradas tambem podem vir de um edge via <code>POST /api/events/ingest</code>.</p>
+        <p class="warn">Por defeito a deteccao facial vem <strong>desligada</strong> — marque o checkbox em Configuracao da camera e clique em gravar; sem isso e sem edge, os numeros permanecem em zero. Com os <strong>modelos DNN</strong> instalados (<code>YuNet</code> + <code>SFace</code>), a acuracia de deteccao e re-identificacao melhora significativamente. Execute <code>scripts/download_demographics_models.sh</code> ou atualize pela interface.</p>
         <p id="live-detection-hint" class="warn" hidden></p>
         <div id="live-status" class="pill">Carregando...</div>
         <div class="live-grid">
@@ -72,12 +72,10 @@
         <div id="sec-monitor" class="preview-monitor" data-camera-fps="{{ config.camera_fps }}">
           <h3>Monitor da camera (preview de video)</h3>
           <p class="help">
-            <strong>Raspberry Pi 4:</strong> alvo principal — camera USB ou modulo via V4L2 (normalmente <code>/dev/video0</code>).
-            O usuario do servico deve estar no grupo <code>video</code>. Resolucao e FPS da configuracao pesam na CPU do Pi;
+            <strong>Raspberry Pi 4:</strong> camera USB ou modulo via V4L2 (normalmente <code>/dev/video0</code>).
+            O usuario do servico deve estar no grupo <code>video</code>. Resolucao e FPS pesam na CPU;
             valores moderados (ex.: 640x360, 8 FPS) sao recomendados.
-            O preview mostra o <strong>fluxo de video</strong> (JPEG no navegador) para confirmar enquadramento. Com <strong>Deteccao automatica</strong> ligada na configuracao, o mesmo fluxo de captura corre em <strong>segundo plano</strong> (nao precisa iniciar o preview): o servidor aplica HOG e grava entradas/saidas como se fossem <code>ingest</code>.
-            Continua possivel usar um <strong>edge externo</strong> com <code>POST /api/events/ingest</code> em paralelo.
-            <em>macOS (dev):</em> indices <code>0</code>/<code>1</code> ou permissao em Privacidade &gt; Camera para o app que corre o Python.
+            O preview mostra o <strong>fluxo de video</strong> (JPEG no navegador) para confirmar enquadramento. Com <strong>Deteccao facial</strong> ligada, o mesmo fluxo de captura corre em <strong>segundo plano</strong> (nao precisa iniciar o preview): o servidor detecta rostos e grava entradas/saidas.
           </p>
           {% if not camera_preview.opencv_installed %}
           <p class="warn">OpenCV nao esta instalado. No ambiente do app: <code>pip install opencv-python-headless</code> e reinicie o servidor.</p>
@@ -167,7 +165,7 @@
           </div>
         </div>
 
-        <p class="help">Totais no painel: no horario da agenda mostram o <strong>culto ativo</strong>; fora da janela, o agregado <strong>global</strong> (a deteccao HOG, se ligada, alimenta os dois conforme o horario de cada evento). Rotulo: <strong id="live-service">-</strong>. Chave: <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
+        <p class="help">Totais no painel: no horario da agenda mostram o <strong>culto ativo</strong>; fora da janela, o agregado <strong>global</strong> (a deteccao facial, se ligada, alimenta os dois conforme o horario de cada evento). Rotulo: <strong id="live-service">-</strong>. Chave: <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
       </section>
 
       <section id="sec-cultos" class="card">
@@ -255,9 +253,9 @@
             <label>Nome da camera (exibido no painel)<input type="text" name="camera_label" value="{{ config.camera_label }}" required /></label>
             <label class="checkbox full">
               <input type="checkbox" name="live_detection_enabled" {% if config.live_detection_enabled %}checked{% endif %} />
-              Deteccao automatica de pessoas no servidor (HOG, 24/7 se a camera estiver ligada; nao depende da agenda nem do preview no browser)
+              Deteccao facial automatica (24/7 se a camera estiver ligada; nao depende da agenda nem do preview)
             </label>
-            <p class="help full">Alimenta o painel pela <strong>mesma logica que <code>POST /api/events/ingest</code></strong>: entradas, saidas, ocupacao, picos e contagem de &ldquo;unicos&rdquo; (aqui cada <code>hog_*</code> e um track visual). O rotulo de culto na UI segue a <strong>agenda e a hora atual</strong>. Com <strong>Estimar faixa etaria</strong> / <strong>Estimar genero</strong> ligados e os <strong>pesos DNN</strong> instalados no Pi (<code>data/opencv_dnn_models/</code>, ver README), cada <strong>entrada</strong> HOG tenta detetar rosto no recorte da pessoa e preencher idade/sexo (aproximados; vista de cima piora acerto). Sem pesos ou sem rosto visivel, o evento segue sem esses campos. <strong>Reentrada</strong> (janela em minutos) compara com o mesmo <code>person_id</code>; o id HOG muda quando a pessoa some do quadro — para identidade estavel prefira edge dedicado.</p>
+            <p class="help full">Detecta <strong>rostos</strong> via <code>YuNet</code> (DNN, preferencial) com fallback <code>Haar</code>. Re-identificacao anonima via <code>SFace</code> (embedding neural 128-d) com fallback <code>DCT</code>. Com <strong>Estimar faixa etaria</strong> / <strong>Estimar genero</strong> ligados e os <strong>modelos DNN</strong> instalados (<code>data/opencv_dnn_models/</code>), cada <strong>entrada</strong> preenche idade/sexo aproximados. <strong>Reentrada</strong> (janela em minutos) compara com o mesmo <code>person_id</code> anonimo.</p>
           </div>
         </section>
 
@@ -310,7 +308,7 @@
             A <strong>frequencia</strong> e o numero de <strong>dias de calendario distintos</strong> em que houve pelo menos uma <em>entrada</em> nesse periodo (nao e numero de cultos).
             Defina dois limites inclusivos: quem esta ate o primeiro e <em>visitante</em>; acima disso ate o segundo e <em>frequentador</em>; acima do segundo e <em>membro</em>.
             Ex.: janela 30, visitante ate 2, frequentador ate 5 &rarr; 1-2 dias = visitante, 3-5 = frequentador, 6+ = membro.
-            Requer <code>person_id</code> estavel (edge ou match facial anonimo quando houver rosto visivel). Sem rosto claro, o fallback HOG pode trocar id entre visitas.
+            Requer <code>person_id</code> estavel (edge ou re-identificacao facial anonima via <code>SFace</code>).
           </p>
           <div class="grid">
             <label>Janela (dias)<input type="number" name="envolvimento_janela_dias" min="7" max="120" value="{{ config.envolvimento_janela_dias }}" required title="Todos os niveis contam entradas neste periodo movel" /></label>

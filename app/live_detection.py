@@ -1,24 +1,28 @@
 """
-Deteccao continua por rosto (OpenCV Haar Cascade) no mesmo fluxo da camera.
+Deteccao continua por rosto no mesmo fluxo da camera.
 Gera entradas/saidas via ingest_event — independente do browser aberto.
 
-Emparelhamento IoU + distancia reduz troca de id. Reutilizacao de track recente
-aproxima unicos. **Entrada** só depois de varios frames seguidos com deteccao;
-**saida** só se já houve entrada — evita par entrada/saida fantasma.
+Pipeline por frame:
+  1. Redimensiona frame → CLAHE (normaliza iluminacao variavel)
+  2. Detecta rostos: YuNet DNN (se modelo presente) ou Haar Cascade (fallback)
+  3. Tracker IoU + distancia mantém identidade entre frames
+  4. Acumula o melhor crop (maior area) durante os frames de estabilizacao
+  5. Entrada confirmada apos N frames → melhor crop alimenta re-id + demographics
+  6. Saida gravada apos N frames sem deteccao
 """
 from __future__ import annotations
 
 import logging
 import math
 import threading
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
 import numpy as np
 
 from .anonymous_face_reid import resolve_anonymous_person_id
-from .demographics_opencv import extract_largest_face_crop
-from .demographics_opencv import estimate_demographics_optional
+from .demographics_opencv import estimate_demographics_from_face
 from .models import EventIngestRequest, GenderBand
 from .retention import ingest_event, load_config
 
@@ -32,53 +36,61 @@ except ImportError:
     cv2 = None  # type: ignore[assignment]
     HAS_CV2 = False
 
+_MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "opencv_dnn_models"
+
+# --- Detector state ---
 _face_cascade: Any | None = None
 _face_lock = threading.Lock()
+_yunet: Any | None = None
+_yunet_attempted = False
+_yunet_lock = threading.Lock()
+_detector_type: str = ""
 
+_clahe: Any | None = None
+_clahe_lock = threading.Lock()
+
+# --- Tracking state ---
 _state_lock = threading.Lock()
 _tracks: dict[int, dict[str, Any]] = {}
 _next_tid = 1
 _last_cfg_off = True
-# Saidas recentes (flicker): reutilizar o mesmo track se voltar a aparecer perto
-_exit_ring: list[
-    tuple[
-        float,
-        float,
-        float,
-        float,
-        int,
-        tuple[float, float, float, float],
-        str | None,
-    ]
-] = []
-_EXIT_RING_CAP = 96
-_REUSE_MAX_SEC = 55.0
-_REUSE_DIST = 88.0
-_REUSE_SZ_DIFF = 48.0
 
-# Distancia maxima (pixels no frame redimensionado) para manter o mesmo track
-_MATCH_DIST = 130.0
-# Sobreposicao minima (IoU) para considerar a mesma pessoa quando o centro salta
-_MIN_IOU_MATCH = 0.08
-# Frames sem deteccao antes de contar saida (~8 FPS => ~3s)
-_MAX_MISSES = 24
-# Frames seguidos com deteccao antes de gravar entrada (evita entrada+saida fantasma no mesmo instante)
-_ENTRADA_MIN_FRAMES = 2
-# Largura maxima do lado maior ao correr detector (velocidade no Pi)
-_DETECT_MAX_SIDE = 520
-# Haar params para deteccao facial.
-_FACE_SCALE_FACTOR = 1.10
-_FACE_MIN_NEIGHBORS = 4
-_FACE_MIN_W = 22
-_FACE_MIN_H = 22
-_FACE_MAX_W_RATIO = 0.75
-_FACE_MAX_H_RATIO = 0.85
+_exit_ring: list[
+    tuple[float, float, float, float, int, tuple[float, float, float, float], str | None]
+] = []
+_EXIT_RING_CAP = 64
+_REUSE_MAX_SEC = 45.0
+_REUSE_DIST = 70.0
+_REUSE_SZ_DIFF = 28.0
+
+# --- Parametros de tracking (calibrados para rostos) ---
+_MATCH_DIST = 85.0
+_MIN_IOU_MATCH = 0.12
+_MAX_MISSES = 20
+_ENTRADA_MIN_FRAMES = 3
+_DETECT_MAX_SIDE = 480
+
+# Haar fallback params
+_HAAR_SCALE_FACTOR = 1.12
+_HAAR_MIN_NEIGHBORS = 4
+_HAAR_MIN_W = 28
+_HAAR_MIN_H = 28
+_HAAR_MAX_W_RATIO = 0.70
+_HAAR_MAX_H_RATIO = 0.80
+
+# YuNet params
+_YUNET_SCORE_THRESHOLD = 0.65
+_YUNET_NMS_THRESHOLD = 0.3
+_YUNET_MAX_W_RATIO = 0.70
+_YUNET_MAX_H_RATIO = 0.80
+
+_FACE_PAD_RATIO = 0.30
+_MIN_CROP_PX = 40
 
 
 def _iou_xywh(
     a: tuple[float, float, float, float], b: tuple[float, float, float, float]
 ) -> float:
-    """IoU entre retangulos (x, y, w, h) no mesmo espaco de coordenadas."""
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
     x0 = max(ax, bx)
@@ -94,10 +106,20 @@ def _iou_xywh(
 
 def _prune_exit_ring(now_m: float) -> None:
     global _exit_ring
-    keep = _REUSE_MAX_SEC + 15.0
+    keep = _REUSE_MAX_SEC + 10.0
     _exit_ring = [r for r in _exit_ring if now_m - r[0] <= keep]
     while len(_exit_ring) > _EXIT_RING_CAP:
         _exit_ring.pop(0)
+
+
+def _get_clahe() -> Any | None:
+    global _clahe
+    if not HAS_CV2 or cv2 is None:
+        return None
+    with _clahe_lock:
+        if _clahe is None:
+            _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        return _clahe
 
 
 def _get_face_cascade() -> Any | None:
@@ -115,30 +137,87 @@ def _get_face_cascade() -> Any | None:
         return _face_cascade
 
 
-def _detect_faces(
-    cascade: Any,
-    gray: np.ndarray,
+def _get_yunet(input_w: int, input_h: int) -> Any | None:
+    """Tenta carregar YuNet DNN face detector (muito mais preciso que Haar)."""
+    global _yunet, _yunet_attempted
+    if not HAS_CV2 or cv2 is None:
+        return None
+    if not hasattr(cv2, "FaceDetectorYN"):
+        return None
+    with _yunet_lock:
+        if _yunet is not None:
+            _yunet.setInputSize((input_w, input_h))
+            return _yunet
+        if _yunet_attempted:
+            return None
+        _yunet_attempted = True
+        model_path = _MODEL_DIR / "face_detection_yunet_2023mar.onnx"
+        if not model_path.is_file():
+            logger.info(
+                "YuNet nao encontrado em %s — usando Haar como fallback. "
+                "Execute scripts/download_demographics_models.sh para instalar.",
+                model_path,
+            )
+            return None
+        try:
+            _yunet = cv2.FaceDetectorYN.create(
+                str(model_path),
+                "",
+                (input_w, input_h),
+                score_threshold=_YUNET_SCORE_THRESHOLD,
+                nms_threshold=_YUNET_NMS_THRESHOLD,
+            )
+            logger.info("YuNet DNN face detector carregado com sucesso.")
+            return _yunet
+        except Exception as exc:
+            logger.warning("Falha ao carregar YuNet: %s", exc)
+            return None
+
+
+def _detect_faces_yunet(
+    detector: Any, frame_bgr: np.ndarray, img_w: int, img_h: int
 ) -> list[list[int]]:
+    """Deteccao via YuNet DNN — retorna lista de [x, y, w, h]."""
+    try:
+        _, faces = detector.detect(frame_bgr)
+    except Exception as exc:
+        logger.warning("YuNet detect falhou: %s", exc)
+        return []
+    if faces is None:
+        return []
+    max_w = int(max(1, img_w * _YUNET_MAX_W_RATIO))
+    max_h = int(max(1, img_h * _YUNET_MAX_H_RATIO))
+    result: list[list[int]] = []
+    for face in faces:
+        x, y, w, h = int(face[0]), int(face[1]), int(face[2]), int(face[3])
+        if w < _HAAR_MIN_W or h < _HAAR_MIN_H:
+            continue
+        if w > max_w or h > max_h:
+            continue
+        result.append([x, y, w, h])
+    return result
+
+
+def _detect_faces_haar(cascade: Any, gray: np.ndarray) -> list[list[int]]:
+    """Deteccao via Haar Cascade (fallback)."""
     try:
         out = cascade.detectMultiScale(
             gray,
-            scaleFactor=_FACE_SCALE_FACTOR,
-            minNeighbors=_FACE_MIN_NEIGHBORS,
-            minSize=(_FACE_MIN_W, _FACE_MIN_H),
+            scaleFactor=_HAAR_SCALE_FACTOR,
+            minNeighbors=_HAAR_MIN_NEIGHBORS,
+            minSize=(_HAAR_MIN_W, _HAAR_MIN_H),
         )
     except Exception as exc:
-        logger.warning("Face detectMultiScale falhou: %s", exc)
+        logger.warning("Haar detectMultiScale falhou: %s", exc)
         return []
-
-    rects = out
     rect_list: list[list[int]] = []
-    if rects is not None and len(rects) > 0:
+    if out is not None and len(out) > 0:
         h, w = gray.shape[:2]
-        max_w = int(max(1, w * _FACE_MAX_W_RATIO))
-        max_h = int(max(1, h * _FACE_MAX_H_RATIO))
-        for (_i, (x, y, rw, rh)) in enumerate(rects):
+        max_w = int(max(1, w * _HAAR_MAX_W_RATIO))
+        max_h = int(max(1, h * _HAAR_MAX_H_RATIO))
+        for x, y, rw, rh in out:
             xi, yi, wi, hi = int(x), int(y), int(rw), int(rh)
-            if wi < _FACE_MIN_W or hi < _FACE_MIN_H:
+            if wi < _HAAR_MIN_W or hi < _HAAR_MIN_H:
                 continue
             if wi > max_w or hi > max_h:
                 continue
@@ -154,9 +233,39 @@ def reset_tracks() -> None:
         _exit_ring.clear()
 
 
+def _padded_face_crop(
+    frame_bgr: np.ndarray,
+    rect_small: tuple[float, float, float, float],
+    small_w: int,
+    small_h: int,
+    full_w: int,
+    full_h: int,
+) -> np.ndarray | None:
+    """Extrai crop do rosto com padding a partir do bbox no frame redimensionado."""
+    sx, sy, srw, srh = rect_small
+    if small_w <= 0 or small_h <= 0 or full_w <= 0 or full_h <= 0:
+        return None
+    fx = full_w / float(small_w)
+    fy = full_h / float(small_h)
+    face_x = sx * fx
+    face_y = sy * fy
+    face_w = srw * fx
+    face_h = srh * fy
+    pad_w = face_w * _FACE_PAD_RATIO
+    pad_h = face_h * _FACE_PAD_RATIO
+    x0 = int(max(0, face_x - pad_w))
+    y0 = int(max(0, face_y - pad_h))
+    x1 = int(min(full_w, face_x + face_w + pad_w))
+    y1 = int(min(full_h, face_y + face_h + pad_h))
+    if (x1 - x0) < _MIN_CROP_PX or (y1 - y0) < _MIN_CROP_PX:
+        return None
+    crop = frame_bgr[y0:y1, x0:x1]
+    return crop if crop.size > 0 else None
+
+
 def on_frame_bgr(frame: np.ndarray) -> None:
     """Chamado a partir do thread de captura apos ler um frame BGR."""
-    global _next_tid, _last_cfg_off
+    global _next_tid, _last_cfg_off, _detector_type
 
     if not HAS_CV2 or frame is None or frame.size == 0:
         return
@@ -169,23 +278,31 @@ def on_frame_bgr(frame: np.ndarray) -> None:
         return
     _last_cfg_off = False
 
-    cascade = _get_face_cascade()
-    if cascade is None:
-        return
-
     h, w = frame.shape[:2]
     side = max(h, w)
     scale = min(1.0, _DETECT_MAX_SIDE / float(side)) if side > 0 else 1.0
     small_w = max(1, int(w * scale))
     small_h = max(1, int(h * scale))
     small = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_AREA)
-    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
 
-    rect_list = _detect_faces(cascade, gray)
+    # --- Deteccao: YuNet (DNN) com fallback para Haar ---
+    yunet = _get_yunet(small_w, small_h)
+    if yunet is not None:
+        rect_list = _detect_faces_yunet(yunet, small, small_w, small_h)
+        _detector_type = "yunet"
+    else:
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        clahe = _get_clahe()
+        if clahe is not None:
+            gray = clahe.apply(gray)
+        cascade = _get_face_cascade()
+        if cascade is None:
+            return
+        rect_list = _detect_faces_haar(cascade, gray)
+        _detector_type = "haar"
 
-    # (cx, cy, sz, x, y, rw, rh) em coordenadas do frame redimensionado (small)
     detections: list[tuple[float, float, float, float, float, float, float]] = []
-    for (xi, yi, wi, hi) in rect_list:
+    for xi, yi, wi, hi in rect_list:
         cx = float(xi + wi / 2.0)
         cy = float(yi + hi / 2.0)
         detections.append(
@@ -194,7 +311,8 @@ def on_frame_bgr(frame: np.ndarray) -> None:
 
     to_exit: list[tuple[int, str]] = []
     to_enter: list[int] = []
-    enter_rect_small: dict[int, tuple[float, float, float, float]] = {}
+    enter_best_crop: dict[int, np.ndarray] = {}
+
     with _state_lock:
         _prune_exit_ring(monotonic())
         track_ids = list(_tracks.keys())
@@ -254,13 +372,31 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 tr["rect_small"] = (xs, ys, rws, rhs)
                 tr["misses"] = 0
                 tr["stable_frames"] = int(tr.get("stable_frames", 0)) + 1
+
+                # Acumula melhor crop enquanto estabiliza
+                if not tr.get("entrada_commit"):
+                    crop = _padded_face_crop(
+                        frame, (xs, ys, rws, rhs),
+                        small_w, small_h, w, h,
+                    )
+                    if crop is not None:
+                        area = crop.shape[0] * crop.shape[1]
+                        if area > tr.get("best_crop_area", 0):
+                            tr["best_crop"] = crop.copy()
+                            tr["best_crop_area"] = area
+
                 if (
                     not tr.get("entrada_commit")
                     and tr["stable_frames"] >= _ENTRADA_MIN_FRAMES
                 ):
                     tr["entrada_commit"] = True
                     to_enter.append(tid)
-                    enter_rect_small[tid] = (xs, ys, rws, rhs)
+                    best = tr.get("best_crop")
+                    if best is not None:
+                        enter_best_crop[tid] = best
+                    # Libera referencia ao crop (nao precisa mais)
+                    tr.pop("best_crop", None)
+                    tr.pop("best_crop_area", None)
             else:
                 tr["misses"] = int(tr["misses"]) + 1
                 tr["stable_frames"] = 0
@@ -268,22 +404,15 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                     if tr.get("entrada_commit"):
                         rs = tr.get("rect_small")
                         if rs is not None:
-                            _exit_ring.append(
-                                (
-                                    monotonic(),
-                                    float(tr["cx"]),
-                                    float(tr["cy"]),
-                                    float(tr["sz"]),
-                                    tid,
-                                    (
-                                        float(rs[0]),
-                                        float(rs[1]),
-                                        float(rs[2]),
-                                        float(rs[3]),
-                                    ),
-                                    str(tr.get("person_id") or ""),
-                                )
-                            )
+                            _exit_ring.append((
+                                monotonic(),
+                                float(tr["cx"]),
+                                float(tr["cy"]),
+                                float(tr["sz"]),
+                                tid,
+                                (float(rs[0]), float(rs[1]), float(rs[2]), float(rs[3])),
+                                str(tr.get("person_id") or ""),
+                            ))
                         while len(_exit_ring) > _EXIT_RING_CAP:
                             _exit_ring.pop(0)
                         exit_pid = str(tr.get("person_id") or f"face_{tid}")
@@ -296,8 +425,9 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 continue
             rect = (xs, ys, rws, rhs)
             reuse_tid: int | None = None
+            eperson: str | None = None
             for ri in range(len(_exit_ring) - 1, -1, -1):
-                ts, ecx, ecy, esz, etid, _erect, eperson = _exit_ring[ri]
+                ts, ecx, ecy, esz, etid, _erect, ep = _exit_ring[ri]
                 if nowm - ts > _REUSE_MAX_SEC:
                     continue
                 if abs(sz - esz) > _REUSE_SZ_DIFF:
@@ -305,6 +435,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 if math.hypot(cx - ecx, cy - ecy) > _REUSE_DIST:
                     continue
                 reuse_tid = etid
+                eperson = ep
                 _exit_ring.pop(ri)
                 break
 
@@ -313,6 +444,11 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             else:
                 tid = _next_tid
                 _next_tid += 1
+
+            # Primeiro crop para o novo track
+            initial_crop = _padded_face_crop(
+                frame, rect, small_w, small_h, w, h
+            )
             _tracks[tid] = {
                 "cx": cx,
                 "cy": cy,
@@ -322,29 +458,25 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "stable_frames": 0,
                 "entrada_commit": False,
                 "person_id": eperson if reuse_tid is not None else None,
+                "best_crop": initial_crop.copy() if initial_crop is not None else None,
+                "best_crop_area": (
+                    initial_crop.shape[0] * initial_crop.shape[1]
+                    if initial_crop is not None
+                    else 0
+                ),
             }
 
     for _tid, pid in to_exit:
         _emit_saida(pid)
     for tid in to_enter:
-        resolved_pid = _emit_entrada(
-            tid, frame, small_w, small_h, w, h, enter_rect_small.get(tid)
-        )
+        resolved_pid = _emit_entrada(tid, enter_best_crop.get(tid))
         with _state_lock:
             tr = _tracks.get(tid)
             if tr is not None:
                 tr["person_id"] = resolved_pid
 
 
-def _emit_entrada(
-    track_id: int,
-    frame_bgr: np.ndarray,
-    small_w: int,
-    small_h: int,
-    full_w: int,
-    full_h: int,
-    rect_small: tuple[float, float, float, float] | None,
-) -> str:
+def _emit_entrada(track_id: int, best_crop: np.ndarray | None) -> str:
     pid = f"face_{track_id}"
     cfg = load_config()
     want_age = bool(cfg.estimar_faixa_etaria)
@@ -352,45 +484,25 @@ def _emit_entrada(
     age_est: int | None = None
     gender_band: GenderBand | None = None
 
-    if rect_small is not None and HAS_CV2 and cv2 is not None:
-        sx, sy, srw, srh = rect_small
-        if small_w > 0 and small_h > 0 and full_w > 0 and full_h > 0:
-            fx = full_w / float(small_w)
-            fy = full_h / float(small_h)
-            x0 = int(sx * fx)
-            y0 = int(sy * fy)
-            x1 = int((sx + srw) * fx)
-            y1 = int((sy + srh) * fy)
-            x0 = max(0, min(x0, full_w - 1))
-            y0 = max(0, min(y0, full_h - 1))
-            x1 = max(x0 + 1, min(x1, full_w))
-            y1 = max(y0 + 1, min(y1, full_h))
-            crop = frame_bgr[y0:y1, x0:x1]
-            if crop.size > 0:
-                anon_id = resolve_anonymous_person_id(crop)
-                if anon_id:
-                    pid = anon_id
-                else:
-                    face_crop = extract_largest_face_crop(crop)
-                    if face_crop is not None:
-                        anon_id = resolve_anonymous_person_id(face_crop)
-                        if anon_id:
-                            pid = anon_id
-                if want_age or want_gender:
-                    age_est, g = estimate_demographics_optional(
-                        crop, want_age=want_age, want_gender=want_gender
-                    )
-                    if g in ("homem", "mulher"):
-                        gender_band = g
+    if best_crop is not None and HAS_CV2 and cv2 is not None:
+        anon_id = resolve_anonymous_person_id(best_crop)
+        if anon_id:
+            pid = anon_id
+
+        if want_age or want_gender:
+            age_est, g = estimate_demographics_from_face(
+                best_crop, want_age=want_age, want_gender=want_gender
+            )
+            if g in ("homem", "mulher"):
+                gender_band = g
 
     try:
-        req = EventIngestRequest(
+        ingest_event(EventIngestRequest(
             person_id=pid,
             direction="entrada",
             age_estimate=age_est,
             gender=gender_band,
-        )
-        ingest_event(req)
+        ))
     except Exception as exc:
         logger.warning("ingest entrada falhou (%s): %s", pid, exc)
     return pid
@@ -398,8 +510,6 @@ def _emit_entrada(
 
 def _emit_saida(pid: str) -> None:
     try:
-        ingest_event(
-            EventIngestRequest(person_id=pid, direction="saida")
-        )
+        ingest_event(EventIngestRequest(person_id=pid, direction="saida"))
     except Exception as exc:
         logger.warning("ingest saida falhou (%s): %s", pid, exc)

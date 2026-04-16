@@ -223,7 +223,7 @@ copy_project() {
 install_python_deps() {
   echo "[3/6] Instalando dependencias Python..."
   sudo -u "$RUN_USER" "$PYTHON_BIN" -m pip install -r "$INSTALL_DIR/requirements.txt" --break-system-packages
-  echo "[3b/6] Modelos DNN (idade/sexo no HOG)..."
+  echo "[3b/6] Modelos DNN (deteccao facial, re-id, idade/sexo)..."
   DL_SCRIPT="$INSTALL_DIR/scripts/download_demographics_models.sh"
   if [[ -f "$DL_SCRIPT" ]]; then
     chmod +x "$DL_SCRIPT" 2>/dev/null || true

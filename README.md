@@ -6,7 +6,7 @@ Google Sheets.
 
 ## Visao geral
 
-O projeto **deteta fluxo (opcionalmente no proprio servidor via HOG OpenCV) e/ou
+O projeto **deteta fluxo (opcionalmente no proprio servidor via deteccao facial OpenCV) e/ou
 via edge** e **grava cada evento na base SQLite** (`events`, estado por
 `(culto_id, person_id)` em `service_event_people`, agregados em `service_event_stats` por `culto_id`, incluindo `__global__`). Deteccao integrada e `POST /api/events/ingest` usam a **mesma
 funcao interna** de ingestao — mesma gravacao e mesmas metricas ao vivo.
@@ -17,7 +17,7 @@ Escopo funcional:
 - contagem de entradas e saidas (agregado **global** e, na janela da agenda, particao **por culto** com a mesma chave sintetica `report_culto_id`)
 - ocupacao atual e pico de ocupacao
 - reentrada: mesma `person_id` **na mesma particao** (`__global__` ou culto da agenda), dentro da **janela em minutos** configurada
-- distribuicoes opcionais por faixa etaria e genero (via `ingest` no **edge** ou, no Pi, via **HOG + DNN** quando os pesos OpenCV estao instalados e as opcoes **Estimar** estao ligadas)
+- distribuicoes opcionais por faixa etaria e genero (via `ingest` no **edge** ou, no Pi, via **deteccao facial + DNN** quando os modelos estao instalados e as opcoes **Estimar** estao ligadas)
 - sincronizacao opcional com Google Sheets
 - reconciliacao manual (no Pi ou a posteriori noutro equipamento) para recomputar
   metricas a partir dos **eventos brutos** guardados na tabela `events`
@@ -25,7 +25,7 @@ Escopo funcional:
   entrada numa janela movel (ex. 30 dias); **visitante** ate N dias distintos,
   **frequentador** ate M (M > N), acima disso **membro**; N e M configuraveis no painel.
   Requer `person_id` estavel entre visitas (edge ou recorrencia facial anonima no servidor).
-  IDs locais `hog_*` (detector sem match facial) sao ignorados nesse calculo para evitar
+  IDs locais `face_*` (detector sem match facial) sao ignorados nesse calculo para evitar
   falsos visitantes.
   Ver `GET /api/people/involvement`
 
@@ -35,7 +35,7 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
 
 | Objetivo no rascunho | Estado no VIP |
 |----------------------|---------------|
-| Pi 4 + camera USB (ex. C920), operacao continua | Sim: V4L2, preview, HOG opcional, `systemd` no deploy |
+| Pi 4 + camera USB (ex. C920), operacao continua | Sim: V4L2, preview, deteccao facial 24/7 opcional, `systemd` no deploy |
 | Entradas, saidas, ocupacao, pico | Sim: dashboard + `events` / `service_event_stats` |
 | Reentradas **no mesmo culto** | Sim na particao do culto: mesmo `person_id`, saida anterior dentro de **N minutos**, contagem isolada por `culto_id` da agenda |
 | **Pessoas unicas por culto** | Sim: estado ao vivo em particoes por chave de culto (agenda + horario do evento); na tabela `events` so ha `event_ts` — o culto nao e colado ao registo de deteccao |
@@ -44,7 +44,7 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
 | Painel responsivo (celular / PC) | Sim |
 | Sync Google Sheets opcional | Sim |
 | Configuracao completa via web | Sim: camera, agenda, retencao, regras de envolvimento, Sheets, etc. |
-| Faixa etaria e genero (estimativas) | **Opcional:** `ingest` (edge) ou HOG no servidor com modelos em `data/opencv_dnn_models/` + flags no painel |
+| Faixa etaria e genero (estimativas) | **Opcional:** `ingest` (edge) ou deteccao facial no servidor com modelos em `data/opencv_dnn_models/` + flags no painel |
 | Horarios / picos de entrada | Sim: graficos de fluxo e ocupacao (janela configuravel) |
 | Conciliacao pelo navegador (outro PC/Mac) | Sim: `GET .../events` + `POST .../apply` + botoes no painel |
 | Privacidade: sem nome, IDs tecnicos | Sim: `person_id` / track, sem cadastro nominal no fluxo padrao |
@@ -56,11 +56,11 @@ Tabela rapida: o que o rascunho pede vs o estado atual do VIP.
   - nome, dia da semana, horario e status ativo/inativo
 - Configuracao de camera:
   - dispositivo (ex.: `/dev/video0`), nome, resolucao de inferencia e FPS
-  - deteccao HOG em segundo plano opcional (`live_detection_enabled`): gera
-    entradas/saidas gravadas como os demais eventos (sem preview obrigatorio);
-    pode acrescentar **idade/sexo aproximados** na entrada se existirem `age_net.caffemodel` /
-    `gender_net.caffemodel` (ver `data/opencv_dnn_models/README.md`) e **Estimar faixa etaria** /
-    **Estimar genero** ativos
+  - deteccao facial em segundo plano opcional (`live_detection_enabled`): detecta rostos via
+    YuNet (DNN, preferencial) com fallback Haar, re-identificacao anonima via SFace (128-d)
+    com fallback DCT; gera entradas/saidas gravadas como os demais eventos (sem preview
+    obrigatorio); pode acrescentar **idade/sexo aproximados** se os modelos DNN estiverem
+    instalados e **Estimar faixa etaria** / **Estimar genero** ativos
 - Dashboard em tempo real:
   - entradas, saidas, retornos, unicos, ocupacao atual e pico
   - graficos de fluxo, ocupacao, faixa etaria e genero
@@ -133,9 +133,9 @@ Opcoes adicionais:
 - `--skip-system-deps`
 - `--host 0.0.0.0`
 
-**Raspberry Pi 4:** o preview no painel e so video (JPEG). Opcionalmente, em **Configuracao da camera**, podes ligar **Deteccao automatica** (OpenCV HOG no mesmo thread de captura): corre em **segundo plano** sem abrir o preview, gera `entrada`/`saida` via a mesma logica que `ingest` — com o custo de CPU e imprecisao tipicos do HOG. Em Linux o `pip` nao instala `pyobjc-framework-AVFoundation` (so macOS). Mantenha resolucao/FPS moderados (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
+**Raspberry Pi 4:** o preview no painel e so video (JPEG). Em **Configuracao da camera**, liga **Deteccao facial** para ativar a deteccao automatica 24/7 (nao depende da agenda nem do preview). O detector primario e **YuNet** (DNN ONNX); se indisponivel, usa **Haar Cascade** como fallback. A re-identificacao anonima usa **SFace** (embedding neural 128-d); fallback **DCT**. Mantenha resolucao/FPS moderados (ex.: 640x360, 8 FPS) se notar carga alta; o utilizador do servico deve pertencer ao grupo `video` para V4L2.
 
-**Idade/sexo no HOG (opcional):** os `.caffemodel` vao para `data/opencv_dnn_models/` — o **`update_raspi.sh`** / **`setup_raspi.sh`** tentam baixa-los automaticamente (rede necessaria); tambem podes correr `./scripts/download_demographics_models.sh` à mao. No painel, ligue **Estimar faixa etaria** e/ou **Estimar genero** (secao Faixas etarias e genero). Cada nova **entrada** HOG recorta a caixa da pessoa, tenta detetar rosto (Haar) e corre as redes Caffe; sem rosto ou sem pesos, o evento fica sem demografia. Variavel `VIP_SKIP_DEMOGRAPHICS=1` desliga a inferencia (debug). O treino ou rotulacao manual ficam fora deste painel; a **conciliacao** existente continua a recomputar agregados a partir de `events`.
+**Modelos DNN (opcional mas recomendado):** execute `./scripts/download_demographics_models.sh` ou atualize pela interface (o download e automatico). Modelos: `face_detection_yunet_2023mar.onnx` (deteccao), `face_recognition_sface_2021dec.onnx` (re-id), `age_net.caffemodel` e `gender_net.caffemodel` (idade/sexo). Sem modelos, o sistema funciona com fallbacks (Haar + DCT), porem com menor acuracia. No painel, ligue **Estimar faixa etaria** e/ou **Estimar genero** para ativar demografia. Variavel `VIP_SKIP_DEMOGRAPHICS=1` desliga a inferencia (debug).
 
 Acesso remoto:
 - `http://IP_DO_RASPBERRY:8000`
@@ -206,7 +206,7 @@ sudo systemctl status vip-dashboard.service
 
 ### Painel com metricas sempre a zero
 
-As entradas/saidas vêm de **(A)** deteccao HOG opcional no servidor (`live_detection_enabled` no painel, requer OpenCV e camera ligada) e/ou **(B)** um **edge** externo que chama `POST /api/events/ingest` com `person_id` e `direction`. O preview so mostra imagem; nao e obrigatorio para (A).
+As entradas/saidas vêm de **(A)** deteccao facial opcional no servidor (`live_detection_enabled` no painel, requer OpenCV e camera ligada) e/ou **(B)** um **edge** externo que chama `POST /api/events/ingest` com `person_id` e `direction`. O preview so mostra imagem; nao e obrigatorio para (A).
 
 Teste rápido da API no Pi (ajusta host/porta ao teu serviço):
 
@@ -222,8 +222,8 @@ O dashboard atualiza as **métricas ao vivo** aproximadamente a cada **0,8 s** e
 
 ### Eventos e metricas
 
-- **Deteccao no servidor (HOG):** com camera e `live_detection_enabled` ativos,
-  o processo do painel escreve na base pelo mesmo caminho que abaixo; corre **a qualquer hora** (a agenda **nao** desliga a camera nem o HOG). Por defeito `live_detection_enabled` vem **desligado** na base — ative no painel e grave. Nao e obrigatorio abrir o preview no browser. Com pesos DNN e flags **Estimar**, as **entradas** podem incluir `age_estimate` / `gender` como no `ingest` por JSON.
+- **Deteccao facial no servidor:** com camera e `live_detection_enabled` ativos,
+  o processo do painel detecta rostos e escreve na base pelo mesmo caminho que abaixo; corre **24/7** (a agenda **nao** desliga a camera). Por defeito `live_detection_enabled` vem **desligado** na base — ative no painel e grave. Nao e obrigatorio abrir o preview no browser. Com modelos DNN e flags **Estimar**, as **entradas** podem incluir `age_estimate` / `gender` como no `ingest` por JSON.
 
 - `POST /api/events/ingest`
   - campos:

@@ -1,9 +1,15 @@
-# Modelos DNN (idade / sexo)
+# Modelos DNN (deteccao facial, re-identificacao, idade/sexo)
 
-Os ficheiros `*.caffemodel` sao grandes (~40 MB cada) e **nao** estao no Git.
+Os ficheiros `*.caffemodel` e `*.onnx` sao grandes e **nao** estao no Git.
 
-No Pi, o **`deploy/update_raspi.sh`** e o **`deploy/setup_raspi.sh`** chamam automaticamente
-`scripts/download_demographics_models.sh` (so descarrega o que faltar; precisa de rede).
+Modelos utilizados:
+- `face_detection_yunet_2023mar.onnx` — detector facial YuNet (primario)
+- `face_recognition_sface_2021dec.onnx` — re-identificacao anonima SFace (128-d)
+- `age_net.caffemodel` — estimativa de idade (Caffe DNN)
+- `gender_net.caffemodel` — estimativa de genero (Caffe DNN)
+
+No Pi, o **`deploy/update_raspi.sh`**, o **`deploy/setup_raspi.sh`** e a **atualizacao pela interface**
+chamam automaticamente `scripts/download_demographics_models.sh` (so descarrega o que faltar; precisa de rede).
 
 Manualmente (qualquer maquina):
 
@@ -14,6 +20,8 @@ chmod +x scripts/download_demographics_models.sh
 
 Requisitos: `curl`. Os ficheiros `age_deploy.prototxt` e `gender_deploy.prototxt` ja vao com o projeto.
 
-Sem estes pesos, a deteccao HOG continua a funcionar; apenas **nao** ha estimativa de idade/sexo no `ingest` (o log regista uma vez que faltam modelos).
+Sem os modelos ONNX, o sistema usa fallbacks (Haar Cascade para deteccao, DCT para re-id) com menor acuracia.
+Sem os `.caffemodel`, a deteccao facial continua a funcionar; apenas **nao** ha estimativa de idade/sexo.
 
-Origem dos pesos: [GilLevi/AgeGenderDeepLearning](https://github.com/GilLevi/AgeGenderDeepLearning) (`models/*.caffemodel` via `raw.githubusercontent.com`). Os `.prototxt` no VIP seguem o tutorial learnopencv/OpenCV DNN; sao compativeis com estes pesos.
+Origem dos pesos Caffe: [GilLevi/AgeGenderDeepLearning](https://github.com/GilLevi/AgeGenderDeepLearning).
+Modelos ONNX: [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo).

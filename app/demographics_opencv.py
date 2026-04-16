@@ -1,8 +1,15 @@
 """
-Estimativa opcional de idade (inteiro) e sexo (homem/mulher) a partir de recorte BGR
-da pessoa (ex.: caixa HOG), via Haar (rosto) + redes Caffe no OpenCV DNN.
+Estimativa opcional de idade (inteiro) e sexo (homem/mulher) a partir de crop
+BGR de rosto, via redes Caffe no OpenCV DNN.
 
-Requer ficheiros em data/opencv_dnn_models/ (ver README e scripts/download_demographics_models.sh).
+Dois modos de entrada:
+  - estimate_demographics_optional: recebe crop generico, detecta rosto via
+    Haar internamente (para uso com crops de corpo inteiro)
+  - estimate_demographics_from_face: recebe crop ja centrado no rosto (com
+    padding), pula Haar — evita deteccao redundante quando o caller ja fez
+
+Requer ficheiros em data/opencv_dnn_models/ (ver README e
+scripts/download_demographics_models.sh).
 """
 from __future__ import annotations
 
@@ -26,7 +33,6 @@ except ImportError:
 
 _MODEL_DIR = Path(__file__).resolve().parent.parent / "data" / "opencv_dnn_models"
 
-# Saidas do age_net (8 classes) -> intervalos aproximados em anos
 _AGE_BUCKETS: list[tuple[int, int]] = [
     (0, 2),
     (4, 6),
@@ -136,9 +142,7 @@ def _largest_face(
 
 
 def extract_largest_face_crop(bgr_crop: np.ndarray) -> np.ndarray | None:
-    """
-    Extrai o maior rosto de um recorte BGR (ou None se nao encontrar).
-    """
+    """Extrai o maior rosto de um recorte BGR (ou None se nao encontrar)."""
     if not HAS_CV2 or cv2 is None:
         return None
     if bgr_crop is None or bgr_crop.size == 0:
@@ -162,42 +166,15 @@ def extract_largest_face_crop(bgr_crop: np.ndarray) -> np.ndarray | None:
     return face_bgr if face_bgr.size > 0 else None
 
 
-def estimate_demographics_optional(
-    bgr_crop: np.ndarray,
+def _run_dnn_inference(
+    face_bgr: np.ndarray,
     *,
     want_age: bool,
     want_gender: bool,
 ) -> tuple[int | None, Literal["homem", "mulher"] | None]:
-    """
-    Devolve (age_estimate, gender) ou (None, None) se desligado, sem OpenCV, sem rosto
-    ou sem redes/pesos.
-    """
-    if not want_age and not want_gender:
-        return None, None
-    if _skip_due_to_env():
-        return None, None
-    if not HAS_CV2 or cv2 is None:
-        return None, None
-    if bgr_crop is None or bgr_crop.size == 0:
-        return None, None
-
-    _try_load_dnn_nets(want_age=want_age, want_gender=want_gender)
-
-    h, w = bgr_crop.shape[:2]
-    if h < 16 or w < 16:
-        return None, None
-
-    face_bgr = extract_largest_face_crop(bgr_crop)
-    if face_bgr is None:
-        return None, None
-
+    """Executa forward pass das redes de idade/genero sobre um crop de rosto."""
     blob = cv2.dnn.blobFromImage(
-        face_bgr,
-        1.0,
-        _BLOB_SIZE,
-        _MODEL_MEAN,
-        swapRB=False,
-        crop=False,
+        face_bgr, 1.0, _BLOB_SIZE, _MODEL_MEAN, swapRB=False, crop=False,
     )
 
     age_out: int | None = None
@@ -222,9 +199,70 @@ def estimate_demographics_optional(
             preds = _gender_net.forward()
             flat = np.array(preds).flatten()
             if flat.size >= 2:
-                # 0 = Male, 1 = Female (prototipo learnopencv)
                 gender_out = "homem" if int(np.argmax(flat)) == 0 else "mulher"
         except Exception as exc:
             logger.debug("gender_net.forward falhou: %s", exc)
 
     return age_out, gender_out
+
+
+def estimate_demographics_optional(
+    bgr_crop: np.ndarray,
+    *,
+    want_age: bool,
+    want_gender: bool,
+) -> tuple[int | None, Literal["homem", "mulher"] | None]:
+    """
+    Recebe crop generico (pode ser corpo inteiro), detecta rosto internamente
+    via Haar e estima idade/genero. Para crops ja centrados no rosto, use
+    estimate_demographics_from_face (mais eficiente).
+    """
+    if not want_age and not want_gender:
+        return None, None
+    if _skip_due_to_env():
+        return None, None
+    if not HAS_CV2 or cv2 is None:
+        return None, None
+    if bgr_crop is None or bgr_crop.size == 0:
+        return None, None
+
+    _try_load_dnn_nets(want_age=want_age, want_gender=want_gender)
+
+    h, w = bgr_crop.shape[:2]
+    if h < 16 or w < 16:
+        return None, None
+
+    face_bgr = extract_largest_face_crop(bgr_crop)
+    if face_bgr is None:
+        return None, None
+
+    return _run_dnn_inference(face_bgr, want_age=want_age, want_gender=want_gender)
+
+
+def estimate_demographics_from_face(
+    face_bgr: np.ndarray,
+    *,
+    want_age: bool,
+    want_gender: bool,
+) -> tuple[int | None, Literal["homem", "mulher"] | None]:
+    """
+    Recebe crop ja centrado no rosto (com padding do detector). Pula a deteccao
+    Haar interna — ideal quando o caller ja fez Haar ou sabe que o crop e um rosto.
+    Economiza ~1 deteccao Haar por entrada no Pi4.
+    """
+    if not want_age and not want_gender:
+        return None, None
+    if _skip_due_to_env():
+        return None, None
+    if not HAS_CV2 or cv2 is None:
+        return None, None
+    if face_bgr is None or face_bgr.size == 0:
+        return None, None
+
+    _try_load_dnn_nets(want_age=want_age, want_gender=want_gender)
+
+    h, w = face_bgr.shape[:2]
+    if h < 20 or w < 20:
+        return None, None
+
+    return _run_dnn_inference(face_bgr, want_age=want_age, want_gender=want_gender)

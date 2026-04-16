@@ -46,7 +46,7 @@ class VipTestCase(unittest.TestCase):
         event_id: str,
         event_type: str,
         event_ts: str,
-        temp_id: str = "hog_test",
+        temp_id: str = "face_test",
     ) -> None:
         with db.get_connection() as conn:
             conn.execute(
@@ -165,13 +165,13 @@ class VipTestCase(unittest.TestCase):
         self.assertTrue(body["checks"]["db"]["ok"])
         self.assertTrue(body["checks"]["camera"]["ok"])
 
-    def test_people_involvement_ignores_local_hog_ids(self) -> None:
+    def test_people_involvement_ignores_local_face_ids(self) -> None:
         now = datetime.now(UTC)
         self._insert_event(
             event_id="hog-in-1",
             event_type="entrada",
             event_ts=(now - timedelta(days=1)).isoformat(),
-            temp_id="hog_123",
+            temp_id="face_123",
         )
         self._insert_event(
             event_id="edge-in-1",
@@ -184,7 +184,7 @@ class VipTestCase(unittest.TestCase):
         ids = {str(row["person_id"]) for row in data["people"]}
 
         self.assertIn("edge_person_1", ids)
-        self.assertNotIn("hog_123", ids)
+        self.assertNotIn("face_123", ids)
         self.assertEqual(int(data["summary"]["visitante"]), 1)
         self.assertEqual(int(data["total"]), 1)
 

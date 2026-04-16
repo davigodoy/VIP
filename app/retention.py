@@ -1262,7 +1262,7 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
         "people": people,
         "nota_identidade": (
             "Fidedigno quando o edge envia o mesmo person_id em cada visita. "
-            "IDs locais hog_* (detector HOG no servidor) sao ignorados no envolvimento "
+            "IDs locais face_* (detector facial no servidor) sao ignorados no envolvimento "
             "para evitar falsos visitantes por troca de track."
         ),
     }
@@ -1740,21 +1740,19 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
     clean_cmd = _git_cmd(repo, "clean", "-fd")
     reset_cmd = _git_cmd(repo, "reset", "--hard", f"origin/{branch}")
 
-    steps: list[tuple[str, list[str], int, bool]] = [
+    models_script = repo / "scripts" / "download_demographics_models.sh"
+
+    steps: list[tuple[str, list[str] | None, int, bool]] = [
         ("git_fetch", fetch_cmd, 10, False),
-        ("git_clean", clean_cmd, 22, False),
-        ("git_reset_hard", reset_cmd, 35, False),
+        ("git_clean", clean_cmd, 20, False),
+        ("git_reset_hard", reset_cmd, 30, False),
+        ("pip_install", pip_exec_cmd, 48, False),
+        ("download_models", None, 62, True),
+        ("compile", [python_exec, "-m", "compileall", "app"], 72, False),
+        ("init_db", [python_exec, "-c", "from app.db import init_db; init_db(); print('DB OK')"], 82, False),
+        ("systemd_restart", ["systemctl", "restart", "vip-dashboard.service"], 94, True),
+        ("systemd_status", ["systemctl", "is-active", "vip-dashboard.service"], 100, True),
     ]
-    if (repo / "requirements.txt").exists():
-        steps.append(("pip_install", pip_exec_cmd, 55, False))
-    steps.extend(
-        [
-            ("compile", [python_exec, "-m", "compileall", "app"], 70, False),
-            ("init_db", [python_exec, "-c", "from app.db import init_db; init_db(); print('DB OK')"], 82, False),
-            ("systemd_restart", ["systemctl", "restart", "vip-dashboard.service"], 94, True),
-            ("systemd_status", ["systemctl", "is-active", "vip-dashboard.service"], 100, True),
-        ]
-    )
 
     warnings: list[str] = []
     try:
@@ -1766,6 +1764,14 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
             message="Preparando atualizacao...",
         )
         for step_name, cmd, pct, optional in steps:
+            if step_name == "pip_install" and not (repo / "requirements.txt").exists():
+                continue
+            if step_name == "download_models":
+                if models_script.is_file():
+                    cmd = ["bash", str(models_script)]
+                else:
+                    continue
+            assert cmd is not None
             _set_update_state(
                 run_id=run_id,
                 status="running",
@@ -1773,11 +1779,11 @@ def run_system_update_job(run_id: str) -> dict[str, Any]:
                 current_step=step_name,
                 message=f"Executando {step_name}...",
             )
-            ok, out = _run_command(
-                cmd,
-                cwd=repo,
-                timeout=600 if step_name == "pip_install" else 180,
-            )
+            if step_name in ("pip_install", "download_models"):
+                step_timeout = 600
+            else:
+                step_timeout = 180
+            ok, out = _run_command(cmd, cwd=repo, timeout=step_timeout)
             _append_update_log(run_id, f"$ {' '.join(cmd)}\n{out}")
             if not ok:
                 if optional:
