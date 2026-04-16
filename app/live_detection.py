@@ -464,6 +464,7 @@ def on_frame_bgr(frame: np.ndarray) -> None:
             initial_crop = _padded_face_crop(
                 frame, rect, small_w, small_h, w, h
             )
+            is_reuse = reuse_tid is not None
             _tracks[tid] = {
                 "cx": cx,
                 "cy": cy,
@@ -475,12 +476,15 @@ def on_frame_bgr(frame: np.ndarray) -> None:
                 "misses": 0,
                 "rect_small": rect,
                 "stable_frames": 0,
-                "reid_done": False,
-                "person_id": eperson if reuse_tid is not None else None,
+                "reid_done": is_reuse,
+                "event_emitted": is_reuse,
+                "person_id": eperson if is_reuse else None,
                 "age_est": None,
                 "gender_band": None,
-                "best_crop": initial_crop.copy() if initial_crop is not None else None,
-                "best_crop_area": (
+                "best_crop": None if is_reuse else (
+                    initial_crop.copy() if initial_crop is not None else None
+                ),
+                "best_crop_area": 0 if is_reuse else (
                     initial_crop.shape[0] * initial_crop.shape[1]
                     if initial_crop is not None
                     else 0
@@ -532,10 +536,14 @@ def _classify_direction(
 def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
     """Emite UM unico evento (entrada ou saida) baseado na direcao do deslocamento.
 
-    Pessoas paradas (deslocamento < _MIN_DISPLACEMENT) sao contadas como
-    ENTRADA — se ficaram estaveis por tempo suficiente (reid_done), estao
-    presentes no local.
+    Tracks reutilizados do exit_ring (event_emitted=True) nao emitem novo
+    evento — a pessoa ja foi contada.  Pessoas paradas (deslocamento <
+    _MIN_DISPLACEMENT) sao contadas como ENTRADA na primeira aparicao.
     """
+    if tr.get("event_emitted"):
+        logger.debug("Track %d reutilizado, evento ja emitido — skip", tid)
+        return
+
     dx = tr["cx"] - tr.get("start_cx", tr["cx"])
     dy = tr["cy"] - tr.get("start_cy", tr["cy"])
 
@@ -561,6 +569,7 @@ def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
             ))
         else:
             ingest_event(EventIngestRequest(person_id=pid, direction="saida"))
+        tr["event_emitted"] = True
     except Exception as exc:
         logger.warning("ingest %s falhou (%s): %s", direction, pid, exc)
 
@@ -577,6 +586,7 @@ def get_tracking_debug() -> dict[str, Any]:
                 "frames": tr.get("stable_frames", 0),
                 "misses": tr.get("misses", 0),
                 "reid_done": bool(tr.get("reid_done")),
+                "event_emitted": bool(tr.get("event_emitted")),
                 "pid": tr.get("person_id"),
             })
         return {
