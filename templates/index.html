@@ -43,7 +43,7 @@
         <h2>Dashboard em tempo real</h2>
         <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong>. A <strong>agenda nao liga nem desliga</strong> a deteccao: com <strong>Deteccao automatica</strong> ativa na camera, o HOG corre <strong>a qualquer hora</strong> (culto e so rotulo / particao dos totais). Entradas tambem podem vir de um edge via <code>POST /api/events/ingest</code>.</p>
         <p class="warn">A deteccao integrada (HOG) e aproximada: pode gerar <strong>falsos positivos</strong> e usa CPU no Pi. Para contagem confiavel em producao, prefira um modelo dedicado no edge enviando <code>ingest</code>. Por defeito a deteccao automatica vem <strong>desligada</strong> — marque o checkbox em Configuracao da camera e clique em gravar; sem isso e sem edge, os numeros permanecem em zero.</p>
-        <p id="live-detection-hint" class="warn" style="margin-top:6px;" hidden></p>
+        <p id="live-detection-hint" class="warn" hidden></p>
         <div id="live-status" class="pill">Carregando...</div>
         <div class="live-grid">
           <div class="metric-box"><span class="metric-label">Ocupacao atual</span><span id="m-current" class="metric-value">-</span></div>
@@ -54,7 +54,7 @@
           <div class="metric-box"><span class="metric-label">Unicos</span><span id="m-unique" class="metric-value">-</span></div>
         </div>
 
-        <h3 class="config-subheading" style="margin-top:14px;">Envolvimento (janela configuravel)</h3>
+        <h3 class="config-subheading">Envolvimento (janela configuravel)</h3>
         <p class="help" id="involvement-dash-hint">
           Contagem por <code>person_id</code> com entrada nos ultimos
           <strong id="involvement-dash-janela">{{ config.envolvimento_janela_dias }}</strong> dias:
@@ -317,7 +317,7 @@
             <label>Visitante — ate quantos dias distintos com entrada?<input type="number" name="envolvimento_max_dias_visitante" min="1" max="120" value="{{ config.envolvimento_max_dias_visitante }}" required title="Inclusive: 1 ate este valor = visitante" /></label>
             <label>Frequentador — ate quantos dias distintos com entrada?<input type="number" name="envolvimento_max_dias_frequentador" min="2" max="120" value="{{ config.envolvimento_max_dias_frequentador }}" required title="Inclusive: acima do limite de visitante ate este valor = frequentador; acima = membro. Deve ser maior que o campo visitante." /></label>
           </div>
-          <p class="help" style="margin-top:10px;">
+          <p class="help">
             <strong>Salvar regras</strong> grava apenas este bloco pela API (sem recarregar a pagina) e atualiza o dashboard e a lista abaixo.
             O botao <strong>Salvar configuracao</strong> no fim do formulario grava <em>toda</em> a configuracao (camera, retencao, etc.), incluindo estes tres valores.
           </p>
@@ -347,7 +347,7 @@
           <div class="actions">
             <button type="submit">Salvar configuracao</button>
           </div>
-          <p class="help" style="margin-top:8px;">A gravacao e feita pela API (<code>POST /api/config</code>): a pagina <strong>nao</strong> recarrega; aparece uma mensagem de confirmacao em cima.</p>
+          <p class="help">A gravacao e feita pela API (<code>POST /api/config</code>): a pagina <strong>nao</strong> recarrega; aparece uma mensagem de confirmacao em cima.</p>
         </section>
       </form>
 

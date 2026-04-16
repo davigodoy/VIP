@@ -129,6 +129,31 @@ h3 {
   padding: 1rem 1.1rem;
   margin-bottom: 1rem;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card > h2,
+.card > h3 {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.card > p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.card > ul,
+.card > ol {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.card > div > p {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .live-card {
@@ -143,9 +168,9 @@ h3 {
   background: #e5e7eb;
   color: #334155;
   font-size: 0.92rem;
-  margin-bottom: 8px;
   line-height: 1.4;
   word-break: break-word;
+  align-self: flex-start;
 }
 
 .live-card.live-offline {
@@ -154,9 +179,19 @@ h3 {
 }
 
 .preview-monitor {
-  margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid #bfdbfe;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preview-monitor > h3 {
+  margin: 0;
+}
+
+.preview-monitor > p {
+  margin: 0;
 }
 
 .preview-frame-wrap {
@@ -184,16 +219,17 @@ h3 {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 10px;
   align-items: center;
 }
 
 .camera-detect-panel {
-  margin-bottom: 14px;
   padding: 10px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .camera-select-row {
@@ -201,7 +237,6 @@ h3 {
   flex-wrap: wrap;
   gap: 10px;
   align-items: stretch;
-  margin: 10px 0 0;
 }
 
 .camera-device-select {
@@ -222,8 +257,7 @@ h3 {
 }
 
 .camera-device-ack {
-  margin-top: 8px;
-  margin-bottom: 0;
+  margin: 0;
   color: #166534;
 }
 
@@ -235,7 +269,6 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
   gap: 10px;
-  margin-top: 10px;
 }
 
 .metric-box {
@@ -300,15 +333,21 @@ h3 {
 }
 
 .chart-range-card {
-  margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .chart-range-card > h3 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 1.15rem;
   color: #1e293b;
+}
+
+.chart-range-card > p {
+  margin: 0;
 }
 
 .chart-range-toolbar {
@@ -316,7 +355,6 @@ h3 {
   flex-wrap: wrap;
   gap: 12px 16px;
   align-items: flex-end;
-  margin-bottom: 6px;
 }
 
 .chart-range-toolbar label {
@@ -330,8 +368,7 @@ h3 {
 
 .chart-range-meta,
 #chart-range-summary {
-  margin-top: 4px;
-  margin-bottom: 10px;
+  margin: 0;
 }
 
 .grid {
@@ -499,7 +536,6 @@ button.danger {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 8px 0;
 }
 
 .progress-wrap progress {
@@ -518,7 +554,6 @@ button.danger {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 10px;
   flex-wrap: wrap;
 }
 
@@ -533,12 +568,6 @@ button.danger {
   background: #fafafa;
 }
 
-.collapsible-history > summary {
-  cursor: pointer;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
 .cell-ellipsis {
   display: inline-block;
   white-space: nowrap;
@@ -548,7 +577,11 @@ button.danger {
 
 .stack-form {
   display: grid;
-  gap: 10px;
+  gap: 14px;
+}
+
+.stack-form > .card {
+  margin-bottom: 0;
 }
 
 details {
@@ -556,16 +589,14 @@ details {
   border-radius: 8px;
   background: #fafafa;
   padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 details summary {
   cursor: pointer;
   font-weight: 600;
-  margin-bottom: 8px;
-}
-
-details[open] summary {
-  margin-bottom: 10px;
 }
 
 .full {
@@ -575,7 +606,7 @@ details[open] summary {
 .config-subheading {
   font-size: 1.08rem;
   font-weight: 600;
-  margin: 18px 0 8px;
+  margin: 0;
   color: #374151;
 }
 
@@ -599,7 +630,6 @@ details[open] summary {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 14px;
 }
 
 .schedule-row {
@@ -620,6 +650,16 @@ details[open] summary {
   gap: 12px;
 }
 
+.status-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-grid > div > h3 {
+  margin: 0;
+}
+
 .status-grid ul {
   margin: 0;
   padding-left: 18px;
@@ -633,7 +673,7 @@ details[open] summary {
 }
 
 .update-run-list {
-  margin: 10px 0 0;
+  margin: 0;
   padding-left: 18px;
 }
 
