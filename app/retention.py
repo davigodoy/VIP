@@ -497,6 +497,16 @@ def wipe_all_test_data() -> dict[str, Any]:
                 counts[table] = -1
         conn.commit()
     invalidate_involvement_summary_cache()
+    crops_dir = Path(__file__).resolve().parent.parent / "data" / "face_crops"
+    crops_removed = 0
+    if crops_dir.is_dir():
+        for f in crops_dir.glob("*.jpg"):
+            try:
+                f.unlink()
+                crops_removed += 1
+            except Exception:
+                pass
+    counts["face_crops"] = crops_removed
     return {"ok": True, "deleted": counts}
 
 
