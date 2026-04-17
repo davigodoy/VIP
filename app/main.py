@@ -57,6 +57,7 @@ from .retention import (
     reset_identified_personas,
     validate_person,
     reject_person,
+    merge_persons,
     wipe_all_test_data,
     request_reconciliation_run,
     request_system_update_run,
@@ -500,6 +501,21 @@ async def api_reject_person(request: Request) -> JSONResponse:
         return JSONResponse(content=result)
     except Exception as exc:
         logger.exception("Erro em /api/person/reject")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@app.post("/api/person/merge")
+async def api_merge_persons(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+        keep = str(body.get("keep_id", "")).strip()
+        merge = str(body.get("merge_id", "")).strip()
+        if not keep or not merge:
+            return JSONResponse(status_code=400, content={"error": "keep_id e merge_id obrigatorios"})
+        result = merge_persons(keep, merge)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.exception("Erro em /api/person/merge")
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 

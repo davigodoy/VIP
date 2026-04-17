@@ -559,6 +559,53 @@ def reject_person(person_id: str) -> dict[str, Any]:
     return {"ok": True, "person_id": person_id, "events_deleted": int(count), "crops_removed": crops_removed}
 
 
+def merge_persons(keep_id: str, merge_id: str) -> dict[str, Any]:
+    """Unifica dois person_ids: move todos os eventos de merge_id para keep_id e remove o perfil duplicado."""
+    if keep_id == merge_id:
+        return {"ok": False, "error": "Os dois IDs sao iguais"}
+    with get_connection() as conn:
+        keep_count = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE temp_id = ?", (keep_id,)
+        ).fetchone()[0]
+        merge_count = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE temp_id = ?", (merge_id,)
+        ).fetchone()[0]
+        if keep_count == 0 and merge_count == 0:
+            return {"ok": False, "error": "Nenhum dos IDs encontrado"}
+
+        conn.execute(
+            "UPDATE events SET temp_id = ? WHERE temp_id = ?",
+            (keep_id, merge_id),
+        )
+        conn.execute(
+            "UPDATE service_event_people SET person_id = ? WHERE person_id = ?",
+            (keep_id, merge_id),
+        )
+        conn.execute(
+            "DELETE FROM anon_face_profiles WHERE person_id = ?", (merge_id,)
+        )
+        conn.commit()
+    invalidate_involvement_summary_cache()
+
+    crops_dir = Path(__file__).resolve().parent.parent / "data" / "face_crops"
+    renamed = 0
+    if crops_dir.is_dir():
+        for f in crops_dir.glob(f"{merge_id}_*.jpg"):
+            try:
+                new_name = f.name.replace(merge_id, keep_id, 1)
+                f.rename(f.parent / new_name)
+                renamed += 1
+            except Exception:
+                pass
+    return {
+        "ok": True,
+        "keep_id": keep_id,
+        "merge_id": merge_id,
+        "events_moved": int(merge_count),
+        "crops_renamed": renamed,
+    }
+
+
 def payload_from_config(config: RetentionConfig) -> dict[str, Any]:
     return config.model_dump()
 

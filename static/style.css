@@ -492,6 +492,15 @@ button.danger {
   min-height: auto;
 }
 
+.validation-cell .btn-merge {
+  padding: 4px 10px;
+  font-size: 1em;
+  min-height: auto;
+  line-height: 1;
+  background: #6366f1;
+  color: #fff;
+}
+
 .cleanup-actions {
   display: flex;
   gap: 10px;

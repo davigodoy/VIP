@@ -2384,6 +2384,7 @@
               <div class="validation-actions" data-pid="${ePid}">
                 <button type="button" class="btn-approve secondary" title="Aprovar">&#10003;</button>
                 <button type="button" class="btn-reject danger" title="Rejeitar">&#10007;</button>
+                <button type="button" class="btn-merge secondary" title="Agrupar com outro perfil">&#8644;</button>
               </div>
               <div class="validation-form" data-pid="${ePid}" style="display:none">
                 <select class="val-gender">${gOpts}</select>
@@ -2399,9 +2400,11 @@
       }
     }
 
+    let _mergePendingPid = null;
+
     (function initValidationListeners() {
       document.addEventListener('click', async function(e) {
-        const btn = e.target.closest('.btn-approve, .btn-reject, .btn-confirm-val, .btn-cancel-val');
+        const btn = e.target.closest('.btn-approve, .btn-reject, .btn-confirm-val, .btn-cancel-val, .btn-merge');
         if (!btn) return;
         const cell = btn.closest('.validation-cell');
         if (!cell) return;
@@ -2409,6 +2412,49 @@
         const formDiv = cell.querySelector('.validation-form');
         const pid = actionsDiv?.dataset.pid;
         if (!pid) return;
+
+        if (btn.classList.contains('btn-merge')) {
+          if (!_mergePendingPid) {
+            _mergePendingPid = pid;
+            btn.style.background = '#f59e0b';
+            btn.textContent = '...';
+            showVipToast('Selecione o segundo perfil para agrupar', 'info');
+          } else if (_mergePendingPid === pid) {
+            _mergePendingPid = null;
+            btn.style.background = '';
+            btn.textContent = '\u21C4';
+            showVipToast('Merge cancelado', 'info');
+          } else {
+            const keep = _mergePendingPid;
+            const merge = pid;
+            if (!confirm(`Agrupar "${merge}" em "${keep}"?\nTodos os eventos de "${merge}" serao movidos para "${keep}".`)) {
+              _mergePendingPid = null;
+              document.querySelectorAll('.btn-merge').forEach(b => { b.style.background = ''; b.textContent = '\u21C4'; });
+              return;
+            }
+            btn.disabled = true;
+            try {
+              const r = await fetch(vipUrl('api/person/merge'), {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ keep_id: keep, merge_id: merge })
+              });
+              const d = await r.json();
+              if (d.ok) {
+                showVipToast(`Agrupado: ${d.events_moved} evento(s) movido(s) para ${keep}`);
+                const mergeRow = document.querySelector(`tr[data-pid="${merge}"]`);
+                if (mergeRow) mergeRow.remove();
+              } else {
+                showVipToast('Erro: ' + (d.error || 'falha'), 'error');
+              }
+            } catch (err) {
+              showVipToast('Erro de rede: ' + err.message, 'error');
+            }
+            _mergePendingPid = null;
+            document.querySelectorAll('.btn-merge').forEach(b => { b.style.background = ''; b.textContent = '\u21C4'; });
+            btn.disabled = false;
+          }
+          return;
+        }
 
         if (btn.classList.contains('btn-approve')) {
           actionsDiv.style.display = 'none';
