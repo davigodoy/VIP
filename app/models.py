@@ -15,7 +15,11 @@ class RetentionConfig(BaseModel):
     retencao_agregados_meses: int = Field(ge=1, le=120)
     retencao_imagens_horas: int = Field(ge=0, le=720)
     janela_reentrada_min: int = Field(ge=1, le=240)
-    limiar_match: float = Field(ge=0.0, le=1.0)
+    limiar_match: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Rigor do match facial anonimo (Re-ID): mais alto = menos fusoes entre pessoas.",
+    )
     auto_cleanup_enabled: bool
     auto_cleanup_hour: int = Field(ge=0, le=23)
     camera_device: str = Field(min_length=1, max_length=255)

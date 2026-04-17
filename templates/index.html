@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Painel de Configuracao - Frequencia</title>
+  <title>VIP — Frequencia e presencas</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Ir para o conteudo principal</a>
   <div id="vip-toast-host" class="vip-toast-host" aria-live="polite" aria-relevant="additions"></div>
   <div id="vip-dedupe-review-modal" class="vip-modal" role="dialog" aria-modal="true" aria-labelledby="vip-dedupe-review-title" style="display:none">
     <div class="vip-modal__backdrop" data-close-dedupe-review="1"></div>
@@ -21,40 +22,59 @@
     </div>
   </div>
   <main class="app-shell">
-    <aside class="sidebar card">
-      <h2>Sistema VIP</h2>
-      <p class="help">Navegacao rapida</p>
-      <nav class="menu">
-        <a href="#sec-dashboard">Dashboard</a>
-        <a href="#sec-monitor">Monitor camera</a>
-        <a href="#sec-cultos">Cultos</a>
-        <a href="#sec-config-camera">Camera</a>
-        <a href="#sec-config-etaria">Faixas etarias</a>
-        <a href="#sec-config-sync">Planilha online</a>
-        <a href="#sec-config-envolvimento">Regras envolvimento</a>
-        <a href="#sec-config-retencao">Retencao</a>
-        <a href="#sec-envolvimento">Lista envolvimento</a>
-        <a href="#sec-update">Atualizacoes</a>
-        <a href="#sec-operacional">Operacional</a>
-        <a href="#sec-conciliacao">Conciliacao</a>
+    <aside class="sidebar card" aria-label="Navegacao do painel">
+      <div class="sidebar-brand">
+        <h2 class="sidebar-brand__title">VIP</h2>
+        <p class="sidebar-brand__tag">Frequencia e camera</p>
+      </div>
+      <nav class="menu" aria-label="Secoes do painel">
+        <div class="nav-group">
+          <span class="nav-group__label">Visao geral</span>
+          <a href="#sec-dashboard">Painel ao vivo</a>
+          <a href="#sec-cultos">Cultos na agenda</a>
+          <a href="#sec-envolvimento">Pessoas e revisao</a>
+          <a href="#sec-monitor">Preview da camera</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group__label">Configuracao</span>
+          <a href="#sec-config-camera">Camera e deteccao</a>
+          <a href="#sec-config-etaria">Idade e genero (estimativa)</a>
+          <a href="#sec-config-sync">Google Sheets</a>
+          <a href="#sec-config-envolvimento">Visitante, frequentador e membro</a>
+          <a href="#sec-config-retencao">Historico na base de dados</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group__label">Sistema</span>
+          <a href="#sec-update">Atualizar codigo (Git)</a>
+          <a href="#sec-operacional">Estado do servico</a>
+          <a href="#sec-conciliacao">Conciliar totais</a>
+          <a href="#sec-limpeza">Limpeza, reset e testes</a>
+          <a href="#sec-cleanup-history">Registo de limpezas</a>
+        </div>
       </nav>
     </aside>
 
-    <section class="main-content">
+    <div id="main-content" class="main-content" role="main" tabindex="-1">
       <div class="topbar card">
-        <div>
-          <h1>Painel de Configuracao e Dashboard</h1>
-          <p class="subtitle">Sistema leve, responsivo e orientado a operacao do culto</p>
+        <div class="topbar-intro">
+          <h1>Frequencia e presencas</h1>
+          <p class="subtitle">Numeros ao vivo, camera e configuracoes num so painel.</p>
         </div>
         <div class="topbar-actions">
-          <button id="refresh-live" type="button" class="secondary">Atualizar agora</button>
+          <button id="refresh-live" type="button" class="secondary" title="Atualiza metricas e graficos">Atualizar dados</button>
         </div>
       </div>
 
-      <section id="sec-dashboard" class="card live-card">
-        <h2>Dashboard em tempo real</h2>
-        <p class="help">Atualizacao rapida: metricas a cada <strong>~0,8&nbsp;s</strong>, graficos a cada <strong>~2,5&nbsp;s</strong>. A <strong>agenda nao liga nem desliga</strong> a deteccao: com <strong>Deteccao facial</strong> ativa na camera, a deteccao corre <strong>24/7</strong> (culto e so rotulo / particao dos totais). Entradas tambem podem vir de um edge via <code>POST /api/events/ingest</code>.</p>
-        <p class="warn">Por defeito a deteccao facial vem <strong>desligada</strong> — marque o checkbox em Configuracao da camera e clique em gravar; sem isso e sem edge, os numeros permanecem em zero. Com os <strong>modelos DNN</strong> instalados (<code>YuNet</code> + <code>SFace</code>), a acuracia de deteccao e re-identificacao melhora significativamente. Execute <code>scripts/download_demographics_models.sh</code> ou atualize pela interface.</p>
+      <section id="sec-dashboard" class="card vip-section live-card" aria-labelledby="sec-dashboard-title">
+        <h2 id="sec-dashboard-title">Painel ao vivo</h2>
+        <p class="dashboard-lead">Metricas renovam cerca de <strong>1&nbsp;s</strong>; graficos cerca de <strong>2,5&nbsp;s</strong>. Com <strong>deteccao facial</strong> ligada na camera, a contagem corre <strong>24 horas por dia</strong> (a agenda so organiza rotulos nos totais).</p>
+        <details class="vip-disclosure">
+          <summary>Mais detalhes tecnicos</summary>
+          <div class="vip-disclosure__body">
+            <p class="help">Entradas podem tambem chegar por outro equipamento via <code>POST /api/events/ingest</code>. A agenda <strong>nao liga nem desliga</strong> a deteccao no servidor.</p>
+            <p class="warn">A deteccao facial costuma vir <strong>desligada</strong> ate voce ativar em <a href="#sec-config-camera">Camera e deteccao</a> e gravar. Sem isso (e sem edge), os contadores ficam em zero. Modelos <code>YuNet</code> + <code>SFace</code> melhoram precisao — use atualizar sistema ou o script de download de modelos.</p>
+          </div>
+        </details>
         <p id="live-detection-hint" class="warn" hidden></p>
         <div id="live-status" class="pill">Carregando...</div>
         <div class="live-grid">
@@ -66,13 +86,13 @@
           <div class="metric-box"><span class="metric-label">Unicos</span><span id="m-unique" class="metric-value">-</span></div>
         </div>
 
-        <h3 class="config-subheading">Envolvimento (janela configuravel)</h3>
+        <h3 class="config-subheading">Pessoas na janela (visitante / membro)</h3>
         <p class="help" id="involvement-dash-hint">
           Contagem por <code>person_id</code> com entrada nos ultimos
           <strong id="involvement-dash-janela">{{ config.envolvimento_janela_dias }}</strong> dias:
           visitante ate <strong id="involvement-dash-max-v">{{ config.envolvimento_max_dias_visitante }}</strong>
           dia(s) distinto(s); frequentador ate <strong id="involvement-dash-max-f">{{ config.envolvimento_max_dias_frequentador }}</strong>;
-          membro acima disso. <a href="#sec-config-envolvimento">Ajustar regras</a>.
+          membro acima disso. <a href="#sec-config-envolvimento">Definicoes</a>.
         </p>
         <div class="live-grid">
           <div class="metric-box"><span class="metric-label">Visitante</span><span id="m-env-visitante" class="metric-value">-</span></div>
@@ -81,14 +101,15 @@
           <div class="metric-box"><span class="metric-label">Total person_id</span><span id="m-env-total" class="metric-value">-</span></div>
         </div>
 
-        <div id="sec-monitor" class="preview-monitor" data-camera-fps="{{ config.camera_fps }}">
-          <h3>Monitor da camera (preview de video)</h3>
-          <p class="help">
-            <strong>Raspberry Pi 4:</strong> camera USB ou modulo via V4L2 (normalmente <code>/dev/video0</code>).
-            O usuario do servico deve estar no grupo <code>video</code>. Resolucao e FPS pesam na CPU;
-            valores moderados (ex.: 640x360, 8 FPS) sao recomendados.
-            O preview mostra o <strong>fluxo de video</strong> (JPEG no navegador) para confirmar enquadramento. Com <strong>Deteccao facial</strong> ligada, o mesmo fluxo de captura corre em <strong>segundo plano</strong> (nao precisa iniciar o preview): o servidor detecta rostos e grava entradas/saidas.
-          </p>
+        <div id="sec-monitor" class="preview-monitor vip-embed" role="region" aria-labelledby="sec-monitor-title" data-camera-fps="{{ config.camera_fps }}">
+          <h3 id="sec-monitor-title">Preview da camera</h3>
+          <p class="help">Use para ver enquadramento e luz. A deteccao no servidor <strong>nao depende</strong> do preview estar ligado.</p>
+          <details class="vip-disclosure vip-disclosure--compact">
+            <summary>Dicas Pi / desempenho</summary>
+            <div class="vip-disclosure__body">
+              <p class="help">Camera USB ou modulo V4L2 (ex. <code>/dev/video0</code>); o utilizador do servico deve estar no grupo <code>video</code>. Resolucao e FPS influenciam a CPU — valores moderados (ex.: 1280x720 com FPS baixo) sao um bom compromisso.</p>
+            </div>
+          </details>
           {% if not camera_preview.opencv_installed %}
           <p class="warn">OpenCV nao esta instalado. No ambiente do app: <code>pip install opencv-python-headless</code> e reinicie o servidor.</p>
           {% elif not camera_status.camera_enabled %}
@@ -136,9 +157,15 @@
           </div>
         </div>
 
-        <div class="chart-range-card" aria-labelledby="chart-range-h">
-          <h3 id="chart-range-h">Graficos por data e hora (janela de 3 horas)</h3>
-          <p class="help">Mostra o mesmo tipo de graficos do painel, num intervalo centrado no instante escolhido: <strong>1h30 antes</strong> e <strong>1h30 depois</strong> (3h no total). A particao (culto na agenda ou global) segue o <strong>horario central</strong>, como nos graficos ao vivo. Atualizacao <strong>manual</strong> — nao acompanha o tempo real.</p>
+        <div class="chart-range-card vip-embed" role="region" aria-labelledby="sec-chart-range-title">
+          <h3 id="sec-chart-range-title">Consulta por data e hora (3 horas)</h3>
+          <p class="help">Mesmos tipos de grafico que em cima, num intervalo centrado no instante que escolher. Atualizacao <strong>manual</strong>.</p>
+          <details class="vip-disclosure vip-disclosure--compact">
+            <summary>Como funciona a janela de 3 horas</summary>
+            <div class="vip-disclosure__body">
+              <p class="help"><strong>1h30 antes</strong> e <strong>1h30 depois</strong> do centro (3h no total). A particao culto/global segue o <strong>horario central</strong>, como nos graficos ao vivo.</p>
+            </div>
+          </details>
           <div class="chart-range-toolbar">
             <label>Data e hora central
               <input type="datetime-local" id="chart-range-center" step="60" />
@@ -177,12 +204,17 @@
           </div>
         </div>
 
-        <p class="help">Totais no painel: no horario da agenda mostram o <strong>culto ativo</strong>; fora da janela, o agregado <strong>global</strong> (a deteccao facial, se ligada, alimenta os dois conforme o horario de cada evento). Rotulo: <strong id="live-service">-</strong>. Chave: <span id="live-culto-id">-</span>. Graficos: faixas de 5 min.</p>
+        <details class="vip-disclosure vip-disclosure--compact">
+          <summary>Rotulo de culto e particao dos totais</summary>
+          <div class="vip-disclosure__body">
+            <p class="help">No horario da agenda mostra-se o <strong>culto ativo</strong>; fora da janela, o agregado <strong>global</strong>. Rotulo: <strong id="live-service">-</strong>. Chave: <span id="live-culto-id">-</span>. Graficos: faixas de 5 minutos.</p>
+          </div>
+        </details>
       </section>
 
-      <section id="sec-cultos" class="card">
-        <h2>Cultos (nome, dia e horario)</h2>
-        <p class="help">Cadastre dia e horario de inicio aproximado; o painel usa isso como <strong>rotulo</strong> e para <strong>particionar totais ao vivo</strong> quando estiver dentro da janela. Os eventos de deteccao gravam só <strong>horario</strong> (timestamp), nao um id de culto na linha do evento.</p>
+      <section id="sec-cultos" class="card vip-section" aria-labelledby="sec-cultos-title">
+        <h2 id="sec-cultos-title">Cultos na agenda</h2>
+        <p class="help">Nome, dia e hora aproximados de inicio. Servem de <strong>rotulo</strong> e para <strong>separar totais ao vivo</strong> na janela do culto. Cada deteccao grava apenas o <strong>instante</strong> (sem id de culto na linha).</p>
         <div class="schedule-list" id="schedule-list-root">
           {% for schedule in schedules %}
           <form class="schedule-row js-schedule-form" data-schedule-id="{{ schedule.id }}">
@@ -236,13 +268,19 @@
       </section>
 
       <form id="vip-config-form" class="stack-form">
-        <section id="sec-config-camera" class="card">
-          <h2>Configuracao da camera</h2>
+        <section id="sec-config-camera" class="card vip-section" aria-labelledby="sec-config-camera-title">
+          <h2 id="sec-config-camera-title">Camera e deteccao</h2>
           <input type="hidden" name="camera_device" id="camera-device-input" value="{{ config.camera_device }}" />
           <input type="hidden" name="camera_enabled_hidden" value="{{ 1 if config.camera_enabled else 0 }}" />
 
           <div class="camera-detect-panel">
-            <p class="help">Escolha a camera detectada. O dispositivo e <strong>gravado no servidor</strong> na hora (Linux/Pi: nomes USB/V4L2 e <code>/dev/v4l/by-id/...</code> quando existir; macOS: nomes via <strong>AVFoundation</strong> na mesma ordem do OpenCV — instale <code>pyobjc-framework-AVFoundation</code> no venv se os rotulos nao aparecerem).</p>
+            <p class="help">Escolha o dispositivo e grave no servidor com a lista abaixo.</p>
+            <details class="vip-disclosure vip-disclosure--compact">
+              <summary>Linux, Pi e macOS</summary>
+              <div class="vip-disclosure__body">
+                <p class="help">Linux/Pi: USB/V4L2 e <code>/dev/v4l/by-id/...</code> quando existir. macOS: rotulos via AVFoundation na ordem do OpenCV — no venv pode ser preciso <code>pyobjc-framework-AVFoundation</code>.</p>
+              </div>
+            </details>
             <div class="camera-select-row">
               <select id="camera-device-select" aria-label="Cameras detectadas" class="camera-device-select">
                 <option value="">-- Selecione uma camera detectada --</option>
@@ -255,7 +293,7 @@
             <p class="help camera-device-ack" id="camera-device-ack" hidden></p>
           </div>
 
-          <h3 class="config-subheading">Captura, janela do culto e nome no painel</h3>
+          <h3 class="config-subheading">Resolucao, FPS e janela do culto</h3>
           <div class="grid camera-config-grid">
             <label>Resolucao inferencia (largura)<input type="number" name="camera_inference_width" min="160" max="1920" value="{{ config.camera_inference_width }}" required /></label>
             <label>Resolucao inferencia (altura)<input type="number" name="camera_inference_height" min="120" max="1080" value="{{ config.camera_inference_height }}" required /></label>
@@ -279,8 +317,8 @@
           </div>
         </section>
 
-        <section id="sec-config-etaria" class="card">
-          <h2>Faixas etarias e genero</h2>
+        <section id="sec-config-etaria" class="card vip-section" aria-labelledby="sec-config-etaria-title">
+          <h2 id="sec-config-etaria-title">Idade e genero (estimativa)</h2>
           <div class="grid">
             <label class="checkbox"><input type="checkbox" name="estimar_faixa_etaria" {% if config.estimar_faixa_etaria %}checked{% endif %} />Estimar faixa etaria</label>
             <label class="checkbox"><input type="checkbox" name="estimar_genero" {% if config.estimar_genero %}checked{% endif %} />Estimar genero</label>
@@ -292,11 +330,9 @@
           </div>
         </section>
 
-        <section id="sec-config-sync" class="card">
-          <h2>Planilha online (Google Sheets)</h2>
-          <p class="help">
-            Dica: voce pode abrir a planilha em nova aba para autenticar no Google pelo navegador.
-          </p>
+        <section id="sec-config-sync" class="card vip-section" aria-labelledby="sec-config-sync-title">
+          <h2 id="sec-config-sync-title">Google Sheets</h2>
+          <p class="help">Sincronize totais com uma planilha. Abra a planilha noutro separador se precisar de iniciar sessao Google.</p>
           <div class="grid">
             <label class="checkbox"><input type="checkbox" name="sync_google_sheets_enabled" {% if config.sync_google_sheets_enabled %}checked{% endif %} />Sincronizar com Google Sheets</label>
             <label>Intervalo de sync (segundos)<input type="number" name="sync_interval_sec" min="30" max="3600" value="{{ config.sync_interval_sec }}" required /></label>
@@ -321,36 +357,37 @@
           </div>
         </section>
 
-        <section id="sec-config-envolvimento" class="card">
-          <h2>Regras de envolvimento (dashboard e lista)</h2>
-          <p class="help">
-            Todos os niveis usam a <strong>mesma janela movel</strong> (ultimos N dias).
-            A <strong>frequencia</strong> e o numero de <strong>dias de calendario distintos</strong> em que houve pelo menos uma <em>entrada</em> nesse periodo (nao e numero de cultos).
-            Defina dois limites inclusivos: quem esta ate o primeiro e <em>visitante</em>; acima disso ate o segundo e <em>frequentador</em>; acima do segundo e <em>membro</em>.
-            Ex.: janela 30, visitante ate 2, frequentador ate 5 &rarr; 1-2 dias = visitante, 3-5 = frequentador, 6+ = membro.
-            Requer <code>person_id</code> estavel (edge ou re-identificacao facial anonima via <code>SFace</code>).
-          </p>
+        <section id="sec-config-envolvimento" class="card vip-section" aria-labelledby="sec-config-envolvimento-title">
+          <h2 id="sec-config-envolvimento-title">Visitante, frequentador e membro</h2>
+          <p class="help">Todos os niveis usam a <strong>mesma janela movel</strong> (ultimos N dias). Contam-se <strong>dias de calendario distintos</strong> com pelo menos uma entrada — nao o numero de cultos.</p>
+          <details class="vip-disclosure vip-disclosure--compact">
+            <summary>Exemplo e requisitos</summary>
+            <div class="vip-disclosure__body">
+              <p class="help">Ex.: janela 30 dias, visitante ate 2, frequentador ate 5 &rarr; 1–2 dias = visitante, 3–5 = frequentador, 6+ = membro. E preciso <code>person_id</code> estavel (edge ou re-identificacao anonima, ex. <code>SFace</code>).</p>
+            </div>
+          </details>
           <div class="grid">
             <label>Janela (dias)<input type="number" name="envolvimento_janela_dias" min="7" max="120" value="{{ config.envolvimento_janela_dias }}" required title="Todos os niveis contam entradas neste periodo movel" /></label>
             <label>Visitante — ate quantos dias distintos com entrada?<input type="number" name="envolvimento_max_dias_visitante" min="1" max="120" value="{{ config.envolvimento_max_dias_visitante }}" required title="Inclusive: 1 ate este valor = visitante" /></label>
             <label>Frequentador — ate quantos dias distintos com entrada?<input type="number" name="envolvimento_max_dias_frequentador" min="2" max="120" value="{{ config.envolvimento_max_dias_frequentador }}" required title="Inclusive: acima do limite de visitante ate este valor = frequentador; acima = membro. Deve ser maior que o campo visitante." /></label>
           </div>
           <p class="help">
-            <strong>Salvar regras</strong> grava apenas este bloco pela API (sem recarregar a pagina) e atualiza o dashboard e a lista abaixo.
-            O botao <strong>Salvar configuracao</strong> no fim do formulario grava <em>toda</em> a configuracao (camera, retencao, etc.), incluindo estes tres valores.
+            <strong>Salvar regras</strong> atualiza so estes tres valores (e o painel). <strong>Salvar configuracao</strong> no fim do formulario grava tudo (camera, retencao, etc.).
           </p>
           <div class="actions">
             <button type="button" id="save-envolvimento-config">Salvar regras de envolvimento</button>
           </div>
         </section>
 
-        <section id="sec-config-retencao" class="card">
-          <h2>Retencao e limpeza</h2>
-          <p class="help">
-            O arquivo para analise em <strong>semanas ou meses</strong> e a tabela <code>events</code> (cada entrada/saida com horario).
-            O campo <strong>Eventos (dias)</strong> define quanto tempo esses registos ficam na base antes da limpeza automatica apagar os mais antigos (por defeito <strong>180</strong>; pode subir, ex. 365, se quiseres mais de meio ano).
-            O painel ao vivo mostra agregados <strong>do instante</strong>, nao um historico diario guardado automaticamente — para totais passados usa conciliacao/exportacao a partir de <code>events</code> ou Google Sheets.
-          </p>
+        <section id="sec-config-retencao" class="card vip-section" aria-labelledby="sec-config-retencao-title">
+          <h2 id="sec-config-retencao-title">Historico na base de dados</h2>
+          <p class="help">Define durante quanto tempo se guardam eventos, perfis e agregados. O painel ao vivo mostra o <strong>agora</strong>; para totais antigos use <a href="#sec-conciliacao">Conciliar totais</a> ou a planilha.</p>
+          <details class="vip-disclosure vip-disclosure--compact">
+            <summary>Nota sobre eventos (dias)</summary>
+            <div class="vip-disclosure__body">
+              <p class="help">A tabela <code>events</code> guarda cada entrada/saida. O valor <strong>Eventos (dias)</strong> limita ha quanto tempo ficam registos antes da limpeza automatica (por defeito 180; pode subir, ex. 365).</p>
+            </div>
+          </details>
           <div class="grid">
             <label>Temp ID (horas)<input type="number" name="retencao_temp_id_horas" min="0" max="720" value="{{ config.retencao_temp_id_horas }}" required title="Tracks temporarios; curto" /></label>
             <label>Profile ID (dias)<input type="number" name="retencao_profile_dias" min="1" max="3650" value="{{ config.retencao_profile_dias }}" required /></label>
@@ -358,7 +395,7 @@
             <label>Agregados (meses)<input type="number" name="retencao_agregados_meses" min="1" max="120" value="{{ config.retencao_agregados_meses }}" required /></label>
             <label>Imagens/Snapshots (horas)<input type="number" name="retencao_imagens_horas" min="0" max="720" value="{{ config.retencao_imagens_horas }}" required /></label>
             <label>Janela de reentrada (min)<input type="number" name="janela_reentrada_min" min="1" max="240" value="{{ config.janela_reentrada_min }}" required /></label>
-            <label>Limiar de match (0-1)<input type="number" name="limiar_match" min="0" max="1" step="0.01" value="{{ config.limiar_match }}" required /></label>
+            <label title="Ajusta o rigor do Re-ID facial (SFace/DCT): mais alto reduz fusoes entre pessoas diferentes. O valor por defeito equivale ao limiar anterior do sistema.">Limiar de match Re-ID (0-1)<input type="number" name="limiar_match" min="0" max="1" step="0.01" value="{{ config.limiar_match }}" required /></label>
             <label>Hora limpeza automatica (0-23)<input type="number" name="auto_cleanup_hour" min="0" max="23" value="{{ config.auto_cleanup_hour }}" required /></label>
             <label class="checkbox"><input type="checkbox" name="auto_cleanup_enabled" {% if config.auto_cleanup_enabled %}checked{% endif %} />Habilitar limpeza automatica diaria</label>
           </div>
@@ -369,21 +406,21 @@
         </section>
       </form>
 
-      <section id="sec-envolvimento" class="card">
-        <h2>Lista de envolvimento (visitante / frequentador / membro)</h2>
+      <section id="sec-envolvimento" class="card vip-section" aria-labelledby="sec-envolvimento-title">
+        <h2 id="sec-envolvimento-title">Pessoas e revisao</h2>
         <p class="help">
-          Com base nas <strong>entradas</strong> gravadas: <strong>dias de calendario distintos</strong> com pelo menos uma entrada nos ultimos
+          Entradas gravadas: <strong>dias de calendario distintos</strong> nos ultimos
           <strong id="involvement-list-janela">{{ config.envolvimento_janela_dias }}</strong> dias.
-          <strong>Visitante:</strong> ate <strong id="involvement-list-max-v">{{ config.envolvimento_max_dias_visitante }}</strong> dia(s) distinto(s);
-          <strong>frequentador:</strong> <strong id="involvement-list-freq-from">{{ config.envolvimento_max_dias_visitante + 1 }}</strong> a <strong id="involvement-list-max-f">{{ config.envolvimento_max_dias_frequentador }}</strong>;
-          <strong>membro:</strong> <strong id="involvement-list-membro-from">{{ config.envolvimento_max_dias_frequentador + 1 }}</strong> ou mais.
-          Ajuste em <a href="#sec-config-envolvimento">Regras envolvimento</a>.
+          <strong>Visitante:</strong> ate <strong id="involvement-list-max-v">{{ config.envolvimento_max_dias_visitante }}</strong> dia(s);
+          <strong>frequentador:</strong> <strong id="involvement-list-freq-from">{{ config.envolvimento_max_dias_visitante + 1 }}</strong>–<strong id="involvement-list-max-f">{{ config.envolvimento_max_dias_frequentador }}</strong>;
+          <strong>membro:</strong> <strong id="involvement-list-membro-from">{{ config.envolvimento_max_dias_frequentador + 1 }}</strong>+.
+          <a href="#sec-config-envolvimento">Alterar limites</a>.
         </p>
         <p class="help warn" id="envolvimento-nota"></p>
         <p class="help" id="envolvimento-resumo">Carregando resumo...</p>
-        <div class="reconcile-actions">
+        <div class="action-toolbar" role="toolbar" aria-label="Lista de pessoas">
           <button type="button" id="envolvimento-refresh" class="secondary">Atualizar lista</button>
-          <button type="button" id="envolvimento-reprocess-dedupe" class="secondary" title="Compara embeddings e funde duplicados; pergunta uma vez se houver casos duvidosos">Reprocessar duplicados</button>
+          <button type="button" id="envolvimento-reprocess-dedupe" class="secondary" title="Compara rostos guardados e sugere fusoes">Unir perfis duplicados</button>
         </div>
         <div class="table-wrap table-wrap--stack">
           <table>
@@ -394,7 +431,7 @@
                 <th>Dias</th>
                 <th>Envolvimento</th>
                 <th>Ultima entrada</th>
-                <th>Validacao</th>
+                <th>Revisao</th>
               </tr>
             </thead>
             <tbody id="envolvimento-body">
@@ -409,8 +446,8 @@
         </div>
       </section>
 
-      <section id="sec-update" class="card">
-        <h2>Atualizacao do sistema</h2>
+      <section id="sec-update" class="card vip-section" aria-labelledby="sec-update-title">
+        <h2 id="sec-update-title">Atualizar codigo (Git)</h2>
         <p class="help warn">
           Atualizar pode reiniciar o servico e causar indisponibilidade temporaria.
           Execute preferencialmente fora do horario de culto.
@@ -425,7 +462,7 @@
           <li><strong>Status:</strong> <span id="upd-last-status">{{ update_status.last_status or 'never' }}</span></li>
         </ul>
         <p id="upd-last-msg" class="help">{{ update_status.last_message or '' }}</p>
-        <div class="reconcile-actions">
+        <div class="action-toolbar" role="toolbar" aria-label="Atualizacao do codigo">
           <button id="run-update-check" type="button" class="secondary">Checar atualizacoes</button>
           <button id="run-update-now" type="button">Atualizar agora (sync com GitHub + deps + restart)</button>
           <p id="update-state" class="help">Status: {{ 'em execucao' if update_status.running else 'ocioso' }}</p>
@@ -434,7 +471,7 @@
           <progress id="update-progress" max="100" value="{{ update_status.progress_pct or 0 }}"></progress>
           <span id="update-progress-label">{{ update_status.progress_pct or 0 }}%</span>
         </div>
-        <details class="collapsible-history">
+        <details class="vip-disclosure vip-disclosure--compact">
           <summary>Ver historico de atualizacoes</summary>
           <div class="table-wrap table-wrap--stack">
             <table>
@@ -462,8 +499,9 @@
         </details>
       </section>
 
-      <section id="sec-operacional" class="card">
-        <h2>Status operacional</h2>
+      <section id="sec-operacional" class="card vip-section" aria-labelledby="sec-operacional-title">
+        <h2 id="sec-operacional-title">Estado do servico</h2>
+        <p class="help">Resumo para confirmar camera, modelos e arranque do sistema.</p>
         <div class="status-grid">
           <div>
             <h3>Camera</h3>
@@ -514,21 +552,17 @@
         </div>
       </section>
 
-      <section id="sec-conciliacao" class="card">
-        <h2>Conciliacao</h2>
-        <p class="help">
-          No servidor: recalcula <code>__global__</code> e cada culto (chave derivada de <code>event_ts</code> + agenda sobre <code>events</code>). No browser: so grava <code>__global__</code> ao aplicar.
-          Cada entrada/saida fica gravada em <code>events</code> no momento do fluxo — e isso que permite <strong>conciliar mais tarde</strong> (ideal no Pi quando couber em CPU; ou neste browser se o Pi estiver limitado).
-          Ajuste <strong>retencao de eventos</strong> na configuracao se precisar de recomputar periodos antigos; apos limpeza, esses eventos deixam de existir para conciliacao.
-        </p>
-        <p class="help">
-          Pode correr <strong>no servidor</strong> (Raspberry) ou <strong>neste browser</strong> (CPU do teu PC/Mac no loop; o servidor so grava o resultado).
-        </p>
-        <p class="help warn">
-          <strong>Servidor:</strong> pode deixar o Pi lento durante o processamento.
-          <strong>Browser:</strong> nao use enquanto a conciliacao no servidor estiver a correr.
-        </p>
-        <div class="reconcile-actions">
+      <section id="sec-conciliacao" class="card vip-section" aria-labelledby="sec-conciliacao-title">
+        <h2 id="sec-conciliacao-title">Conciliar totais</h2>
+        <p class="help">Recalcula agregados a partir dos eventos na base (util depois de importacoes ou correcoes).</p>
+        <details class="vip-disclosure vip-disclosure--compact">
+          <summary>Onde corre e avisos</summary>
+          <div class="vip-disclosure__body">
+            <p class="help">No <strong>servidor</strong>: atualiza <code>__global__</code> e cada culto. No <strong>browser</strong>: grava so <code>__global__</code>. Precisa de eventos ainda na base — veja retencao em <a href="#sec-config-retencao">Historico na base</a>.</p>
+            <p class="help warn">O Pi pode ficar lento durante a corrida no servidor. Nao use browser e servidor ao mesmo tempo.</p>
+          </div>
+        </details>
+        <div class="action-toolbar" role="toolbar" aria-label="Conciliacao de totais">
           <button id="run-reconcile-now" type="button">Rodar no servidor (Pi)</button>
           <button id="run-reconcile-browser" type="button" class="secondary">Rodar neste browser</button>
           <p id="reconcile-state" class="help">Status: carregando...</p>
@@ -538,7 +572,7 @@
           <span id="reconcile-progress-label">0%</span>
         </div>
         <p id="reconcile-message" class="help"></p>
-        <details class="collapsible-history">
+        <details class="vip-disclosure vip-disclosure--compact">
           <summary>Ver historico de conciliacoes</summary>
           <div class="table-wrap table-wrap--stack">
             <table>
@@ -567,9 +601,10 @@
         </details>
       </section>
 
-      <section class="card">
-        <h2>Limpeza manual</h2>
-        <div class="cleanup-actions">
+      <section id="sec-limpeza" class="card vip-section" aria-labelledby="sec-limpeza-title">
+        <h2 id="sec-limpeza-title">Limpeza, reset e testes</h2>
+        <p class="help">Acoes destrutivas: confirme sempre o que pretende fazer.</p>
+        <div class="action-toolbar" role="toolbar" aria-label="Limpeza da base">
           <button type="button" id="cleanup-dry-btn" class="secondary">Simular limpeza (dry-run)</button>
           <button type="button" id="cleanup-real-btn" class="danger">Executar limpeza agora</button>
         </div>
@@ -593,7 +628,7 @@
             Limpar personas de TODOS os eventos (nao apaga os eventos)
           </label>
         </div>
-        <div class="cleanup-actions">
+        <div class="action-toolbar" role="toolbar" aria-label="Reset de personas">
           <button type="button" id="personas-reset-btn" class="danger">Executar reset de personas</button>
         </div>
         <hr />
@@ -602,15 +637,15 @@
           Remove <strong>todos</strong> os eventos, perfis, metricas, tracks e logs de execucao.
           Preserva configuracoes e agendas de cultos. Use durante testes para recomecar do zero.
         </p>
-        <div class="cleanup-actions">
+        <div class="action-toolbar" role="toolbar" aria-label="Limpar todos os dados (teste)">
           <button type="button" id="wipe-all-btn" class="danger">Limpar todos os dados</button>
         </div>
       </section>
 
-      <section class="card">
-        <h2>Historico de limpezas</h2>
-        <details class="collapsible-history">
-          <summary>Ver historico de limpezas</summary>
+      <section id="sec-cleanup-history" class="card vip-section" aria-labelledby="sec-cleanup-history-title">
+        <h2 id="sec-cleanup-history-title">Registo de limpezas</h2>
+        <details class="vip-disclosure vip-disclosure--compact">
+          <summary>Mostrar historico de limpezas</summary>
           <div class="table-wrap table-wrap--stack">
             <table>
               <thead>
@@ -650,7 +685,7 @@
           </div>
         </details>
       </section>
-    </section>
+    </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -2393,7 +2428,7 @@
             <td data-label="Dias">${p.visit_days ?? '-'}</td>
             <td data-label="Envolvimento">${escHtml(p.envolvimento ?? '')}</td>
             <td data-label="Ultima entrada">${escHtml(p.last_entrada ?? '')}</td>
-            <td data-label="Validacao" class="validation-cell">
+            <td data-label="Revisao" class="validation-cell">
               <div class="validation-actions" data-pid="${ePid}">
                 <button type="button" class="btn-approve secondary" title="Aprovar">&#10003;</button>
                 <button type="button" class="btn-reject danger" title="Rejeitar">&#10007;</button>

@@ -217,11 +217,34 @@ def face_descriptor(face_bgr: np.ndarray) -> np.ndarray | None:
     return _dct_descriptor(face_bgr)
 
 
-def _threshold_for_descriptor(desc: np.ndarray) -> float:
-    """Seleciona threshold baseado na dimensao do embedding."""
-    if desc.size == 128:
-        return _THRESHOLD_SFACE
-    return _THRESHOLD_DCT
+def _reid_similarity_threshold(limiar_match: float, desc_size: int) -> float:
+    """Similaridade minima (dot product de vetores L2-normalizados) para match Re-ID.
+
+    O campo ``limiar_match`` do painel ajusta o rigor: mais alto = menos fusoes
+    (menos risco de confundir duas pessoas), mais baixo = mais recorrencias ligadas.
+    O valor por defeito na base (0.75) recupera o limiar historico do codigo.
+    """
+    lim = float(limiar_match)
+    if desc_size == 128:
+        return max(0.22, min(0.52, _THRESHOLD_SFACE + (lim - 0.75) * 0.35))
+    return max(0.72, min(0.96, _THRESHOLD_DCT + (lim - 0.75) * 0.25))
+
+
+def crop_has_detectable_face(face_bgr: np.ndarray) -> bool:
+    """Confirma rosto no crop com o YuNet singleton do Re-ID (evita recriar DNN no Pi)."""
+    if not HAS_CV2 or cv2 is None or face_bgr is None or face_bgr.size == 0:
+        return True
+    h, w = face_bgr.shape[:2]
+    if h < 24 or w < 24:
+        return False
+    yunet = _get_yunet_for_reid(w, h)
+    if yunet is None:
+        return True
+    try:
+        _, faces = yunet.detect(face_bgr)
+        return faces is not None and len(faces) > 0
+    except Exception:
+        return True
 
 
 def _load_profiles(conn: Any) -> list[tuple[str, np.ndarray, int]]:
@@ -272,11 +295,14 @@ def resolve_anonymous_person_id(face_bgr: np.ndarray) -> str | None:
     Retorna person_id tecnico (anon_*) existente se a similaridade ultrapassar
     o limiar, ou cria um novo perfil. Retorna None se o crop for insuficiente.
     """
+    from .retention import load_config
+
     desc = face_descriptor(face_bgr)
     if desc is None:
         return None
 
-    threshold = _threshold_for_descriptor(desc)
+    limiar = load_config().limiar_match
+    threshold = _reid_similarity_threshold(limiar, int(desc.size))
     profiles = _get_cached_profiles()
 
     best_pid = ""
@@ -294,13 +320,6 @@ def resolve_anonymous_person_id(face_bgr: np.ndarray) -> str | None:
             best_seen = seen
 
     now_sql = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-
-    import sys
-    print(
-        f"ReID desc={desc.size} best_sim={best_sim:.3f} thr={threshold:.3f} "
-        f"match={best_pid if best_sim >= threshold else 'NONE'} profiles={len(profiles)}",
-        file=sys.stderr, flush=True,
-    )
 
     if best_pid and best_vec is not None and best_sim >= threshold:
         if best_seen >= _EMA_MIN_SEEN:

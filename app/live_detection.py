@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-from .anonymous_face_reid import resolve_anonymous_person_id
+from .anonymous_face_reid import crop_has_detectable_face, resolve_anonymous_person_id
 from .demographics_opencv import estimate_demographics_from_face
 from .models import EventIngestRequest, GenderBand
 from .retention import ingest_event, load_config
@@ -518,27 +518,8 @@ def _save_face_crop(pid: str, crop: np.ndarray) -> None:
 
 
 def _verify_face_in_crop(crop: np.ndarray) -> bool:
-    """Confirma que o crop realmente contém um rosto (reduz falsos positivos do YuNet)."""
-    if not HAS_CV2 or cv2 is None:
-        return True
-    h, w = crop.shape[:2]
-    if h < 30 or w < 30:
-        return False
-    try:
-        yunet_model = _MODEL_DIR / "face_detection_yunet_2023mar.onnx"
-        if not yunet_model.is_file() or not hasattr(cv2, "FaceDetectorYN"):
-            return True
-        verifier = cv2.FaceDetectorYN.create(
-            str(yunet_model), "", (w, h),
-            score_threshold=0.5, nms_threshold=0.3,
-        )
-        _, faces = verifier.detect(crop)
-        import sys
-        ok = faces is not None and len(faces) > 0
-        print(f"VERIFY crop={w}x{h} faces={'yes' if ok else 'NO'}", file=sys.stderr, flush=True)
-        return ok
-    except Exception:
-        return True
+    """Confirma rosto no crop (YuNet singleton em anonymous_face_reid — Pi-friendly)."""
+    return crop_has_detectable_face(crop)
 
 
 def _resolve_reid_and_demographics(

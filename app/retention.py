@@ -45,6 +45,12 @@ _involvement_summary_cache_time: float = 0.0
 _INVOLVEMENT_SUMMARY_TTL_SEC = 45.0
 _involvement_summary_lock = threading.Lock()
 
+# Evita SELECT+parsing a cada frame da deteccao (Pi 4).
+_config_cache: RetentionConfig | None = None
+_config_cache_ts: float = 0.0
+_CONFIG_CACHE_TTL_SEC = 0.75
+_config_cache_lock = threading.Lock()
+
 
 def invalidate_involvement_summary_cache() -> None:
     global _involvement_summary_cache
@@ -72,6 +78,14 @@ def _legacy_envolvimento_tiers(raw: dict[str, Any]) -> tuple[int, int]:
 
 
 def load_config() -> RetentionConfig:
+    global _config_cache, _config_cache_ts
+    now = time_std.monotonic()
+    with _config_cache_lock:
+        if (
+            _config_cache is not None
+            and (now - _config_cache_ts) < _CONFIG_CACHE_TTL_SEC
+        ):
+            return _config_cache
     with get_connection() as conn:
         rows = conn.execute("SELECT key, value FROM config").fetchall()
     raw = {row["key"]: row["value"] for row in rows}
@@ -140,7 +154,7 @@ def load_config() -> RetentionConfig:
     # Keep app resilient with legacy/bad DB values.
     if source == "file" and not file_path:
         source = "env"
-    return RetentionConfig(
+    cfg = RetentionConfig(
         retencao_temp_id_horas=int(_raw_or_default("retencao_temp_id_horas")),
         retencao_profile_dias=int(_raw_or_default("retencao_profile_dias")),
         retencao_eventos_dias=int(_raw_or_default("retencao_eventos_dias")),
@@ -185,6 +199,16 @@ def load_config() -> RetentionConfig:
             _raw_or_default("envolvimento_max_dias_frequentador")
         ),
     )
+    with _config_cache_lock:
+        _config_cache = cfg
+        _config_cache_ts = time_std.monotonic()
+    return cfg
+
+
+def _invalidate_config_cache() -> None:
+    global _config_cache
+    with _config_cache_lock:
+        _config_cache = None
 
 
 def save_config(payload: RetentionConfig) -> None:
@@ -203,6 +227,7 @@ def save_config(payload: RetentionConfig) -> None:
             )
         conn.commit()
     invalidate_involvement_summary_cache()
+    _invalidate_config_cache()
 
 
 def update_involvement_rules(
