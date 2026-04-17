@@ -2426,14 +2426,14 @@
             });
             const d = await r.json();
             if (d.ok) {
-              showToast(`Rejeitado: ${d.events_deleted} evento(s) removido(s)`);
+              showVipToast(`Rejeitado: ${d.events_deleted} evento(s) removido(s)`);
               const row = btn.closest('tr');
               if (row) row.remove();
             } else {
-              showToast('Erro: ' + (d.error || 'falha'), true);
+              showVipToast('Erro: ' + (d.error || 'falha'), 'error');
             }
           } catch (err) {
-            showToast('Erro de rede: ' + err.message, true);
+            showVipToast('Erro de rede: ' + err.message, 'error');
           }
           btn.disabled = false;
         } else if (btn.classList.contains('btn-confirm-val')) {
@@ -2447,15 +2447,15 @@
             });
             const d = await r.json();
             if (d.ok) {
-              showToast(`Validado: ${d.events_updated} evento(s) atualizado(s)`);
+              showVipToast(`Validado: ${d.events_updated} evento(s) atualizado(s)`);
               formDiv.style.display = 'none';
               actionsDiv.innerHTML = '<span style="color:#16a34a;font-weight:600">&#10003;</span>';
               actionsDiv.style.display = 'flex';
             } else {
-              showToast('Erro: ' + (d.error || 'falha'), true);
+              showVipToast('Erro: ' + (d.error || 'falha'), 'error');
             }
           } catch (err) {
-            showToast('Erro de rede: ' + err.message, true);
+            showVipToast('Erro de rede: ' + err.message, 'error');
           }
           btn.disabled = false;
         }
