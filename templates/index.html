@@ -8,6 +8,18 @@
 </head>
 <body>
   <div id="vip-toast-host" class="vip-toast-host" aria-live="polite" aria-relevant="additions"></div>
+  <div id="vip-dedupe-modal" class="vip-modal" role="dialog" aria-modal="true" aria-labelledby="vip-dedupe-title" style="display:none">
+    <div class="vip-modal__backdrop" data-close-dedupe="1"></div>
+    <div class="vip-modal__panel">
+      <h3 id="vip-dedupe-title">Sugestoes de agrupamento</h3>
+      <p class="help" id="vip-dedupe-modal-summary"></p>
+      <div id="vip-dedupe-modal-list" class="vip-dedupe-list"></div>
+      <div class="vip-modal__actions">
+        <button type="button" id="vip-dedupe-apply-selected" class="secondary">Fundir selecionados</button>
+        <button type="button" id="vip-dedupe-close" class="secondary">Fechar</button>
+      </div>
+    </div>
+  </div>
   <main class="app-shell">
     <aside class="sidebar card">
       <h2>Sistema VIP</h2>
@@ -371,6 +383,7 @@
         <p class="help" id="envolvimento-resumo">Carregando resumo...</p>
         <div class="reconcile-actions">
           <button type="button" id="envolvimento-refresh" class="secondary">Atualizar lista</button>
+          <button type="button" id="envolvimento-reprocess-dedupe" class="secondary" title="Compara embeddings guardados; funde automaticamente os muito parecidos">Reprocessar duplicados</button>
         </div>
         <div class="table-wrap table-wrap--stack">
           <table>
@@ -2535,6 +2548,95 @@
     document.getElementById('envolvimento-refresh')?.addEventListener('click', () => refreshEnvolvimento(1));
     document.getElementById('envolvimento-prev')?.addEventListener('click', () => refreshEnvolvimento(involvementPage - 1));
     document.getElementById('envolvimento-next')?.addEventListener('click', () => refreshEnvolvimento(involvementPage + 1));
+
+    function closeDedupeModal() {
+      const m = document.getElementById('vip-dedupe-modal');
+      if (m) m.style.display = 'none';
+    }
+
+    function openDedupeModal(suggestions) {
+      const m = document.getElementById('vip-dedupe-modal');
+      const list = document.getElementById('vip-dedupe-modal-list');
+      const sum = document.getElementById('vip-dedupe-modal-summary');
+      if (!m || !list) return;
+      list.innerHTML = (suggestions || []).map((s) => {
+        const k = String(s.keep_id || '').replace(/"/g, '');
+        const mg = String(s.merge_id || '').replace(/"/g, '');
+        return `<label class="vip-dedupe-row">
+          <input type="checkbox" checked data-keep="${k}" data-merge="${mg}" />
+          <span>Similaridade ${Number(s.similarity)} — manter <code>${escHtml(k)}</code>, fundir <code>${escHtml(mg)}</code></span>
+        </label>`;
+      }).join('');
+      if (sum) {
+        sum.textContent = (suggestions || []).length + ' par(es) com similaridade moderada. Desmarque os que nao quiser fundir; depois use Fundir selecionados.';
+      }
+      m.style.display = 'flex';
+    }
+
+    document.getElementById('vip-dedupe-modal')?.addEventListener('click', (ev) => {
+      if (ev.target && ev.target.getAttribute('data-close-dedupe')) closeDedupeModal();
+    });
+    document.getElementById('vip-dedupe-close')?.addEventListener('click', closeDedupeModal);
+
+    document.getElementById('vip-dedupe-apply-selected')?.addEventListener('click', async () => {
+      const list = document.querySelectorAll('#vip-dedupe-modal-list input[type=checkbox]:checked');
+      const pairs = [];
+      list.forEach((cb) => {
+        pairs.push({ keep_id: cb.getAttribute('data-keep'), merge_id: cb.getAttribute('data-merge') });
+      });
+      if (!pairs.length) {
+        closeDedupeModal();
+        return;
+      }
+      const btn = document.getElementById('vip-dedupe-apply-selected');
+      if (btn) btn.disabled = true;
+      try {
+        const r = await fetch(vipUrl('api/person/merge-selected'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pairs }),
+        });
+        const d = await r.json();
+        const merged = (d.merged || []).length;
+        const errs = d.errors || [];
+        if (errs.length) {
+          showVipToast('Parcial: ' + merged + ' ok, ' + errs.length + ' erro(s).', 'error');
+        } else {
+          showVipToast('Fundidos: ' + merged + ' par(es).');
+          closeDedupeModal();
+        }
+        refreshEnvolvimento(1);
+      } catch (e) {
+        showVipToast('Erro de rede: ' + e.message, 'error');
+      }
+      if (btn) btn.disabled = false;
+    });
+
+    document.getElementById('envolvimento-reprocess-dedupe')?.addEventListener('click', async () => {
+      if (!confirm('Reprocessar perfis anonimos por similaridade de embedding?\n\nFusoes muito confiantes serao aplicadas automaticamente.\nPares duvidosos aparecerao numa lista para confirmacao.')) return;
+      const btn = document.getElementById('envolvimento-reprocess-dedupe');
+      if (btn) btn.disabled = true;
+      try {
+        const r = await fetch(vipUrl('api/person/reprocess-duplicates'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dry_run: false }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) {
+          showVipToast('Erro: ' + (d.error || String(r.status)), 'error');
+          return;
+        }
+        const nAuto = (d.auto_merged || []).length;
+        const sug = d.suggestions || [];
+        showVipToast('Reprocessado: ' + nAuto + ' fusao(oes) automatica(s), ' + sug.length + ' sugestao(oes).', sug.length ? 'info' : 'success');
+        refreshEnvolvimento(1);
+        if (sug.length > 0) openDedupeModal(sug);
+      } catch (e) {
+        showVipToast('Erro de rede: ' + e.message, 'error');
+      }
+      if (btn) btn.disabled = false;
+    });
     document.getElementById('update-prev')?.addEventListener('click', () => {
       runPagerState.update.page -= 1;
       renderUpdateRuns(runPagerState.update.rows);

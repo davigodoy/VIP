@@ -606,6 +606,254 @@ def merge_persons(keep_id: str, merge_id: str) -> dict[str, Any]:
     }
 
 
+def merge_selected_pairs(pairs: list[tuple[str, str]]) -> dict[str, Any]:
+    """Aplica varias fusoes (keep_id, merge_id) vindas do modal de sugestoes."""
+    merged: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for keep_id, merge_id in pairs:
+        k, m = str(keep_id).strip(), str(merge_id).strip()
+        if not k or not m or k == m:
+            continue
+        r = merge_persons(k, m)
+        if r.get("ok"):
+            merged.append(r)
+        else:
+            errors.append({"keep_id": k, "merge_id": m, "error": r.get("error")})
+    try:
+        from .anonymous_face_reid import _invalidate_cache as _inv_fc
+
+        _inv_fc()
+    except Exception:
+        pass
+    invalidate_involvement_summary_cache()
+    return {"ok": len(errors) == 0, "merged": merged, "errors": errors}
+
+
+def _dot_normalized(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b) or not a:
+        return -1.0
+    return float(sum(x * y for x, y in zip(a, b)))
+
+
+def _dedupe_thresholds(dim: int) -> tuple[float, float]:
+    """Retorna (limiar_auto, limiar_sugestao) para similaridade cosseno em vetores ja L2-normalizados."""
+    if dim == 128:
+        return (0.46, 0.34)
+    if dim == 400:
+        return (0.89, 0.80)
+    return (0.50, 0.40)
+
+
+class _UnionFind:
+    def __init__(self, keys: list[str]) -> None:
+        self._p = {k: k for k in keys}
+
+    def find(self, x: str) -> str:
+        while self._p[x] != x:
+            self._p[x] = self._p[self._p[x]]
+            x = self._p[x]
+        return x
+
+    def union(self, a: str, b: str) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self._p[rb] = ra
+
+
+def reprocess_duplicate_profiles(*, dry_run: bool = False) -> dict[str, Any]:
+    """
+    Varre anon_face_profiles por similaridade de embedding e:
+    - funde automaticamente grupos ligados por arestas com sim >= limiar_auto;
+    - devolve pares com sim entre sugestao e auto para confirmacao no modal.
+    """
+    try:
+        from .anonymous_face_reid import _invalidate_cache as _inv_face_cache
+    except Exception:
+        def _inv_face_cache() -> None:
+            pass
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT person_id, embedding_json, first_seen, seen_count
+            FROM anon_face_profiles
+            """
+        ).fetchall()
+
+    profiles: list[dict[str, Any]] = []
+    for r in rows:
+        pid = str(r["person_id"] or "").strip()
+        raw = str(r["embedding_json"] or "").strip()
+        if not pid or not raw:
+            continue
+        try:
+            vec = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(vec, list) or not vec:
+            continue
+        try:
+            v = [float(x) for x in vec]
+        except (TypeError, ValueError):
+            continue
+        profiles.append(
+            {
+                "person_id": pid,
+                "vec": v,
+                "first_seen": str(r["first_seen"] or ""),
+                "seen_count": int(r["seen_count"] or 0),
+            }
+        )
+
+    n = len(profiles)
+    if n < 2:
+        return {
+            "ok": True,
+            "dry_run": dry_run,
+            "profiles_scanned": n,
+            "profiles_after": n,
+            "auto_merged": [],
+            "suggestions": [],
+            "message": "Menos de 2 perfis para comparar.",
+        }
+
+    pids = [p["person_id"] for p in profiles]
+    first_seen = {p["person_id"]: p["first_seen"] for p in profiles}
+    seen_count = {p["person_id"]: p["seen_count"] for p in profiles}
+
+    def canonical_id(group: list[str]) -> str:
+        return min(
+            group,
+            key=lambda pid: (first_seen.get(pid) or "9999", -seen_count.get(pid, 0), pid),
+        )
+
+    pairs: list[tuple[float, str, str, int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            vi, vj = profiles[i]["vec"], profiles[j]["vec"]
+            if len(vi) != len(vj):
+                continue
+            sim = _dot_normalized(vi, vj)
+            dim = len(vi)
+            _auto_th, suggest_th = _dedupe_thresholds(dim)
+            if sim >= suggest_th:
+                pairs.append((sim, pids[i], pids[j], dim))
+
+    pairs.sort(key=lambda t: -t[0])
+
+    uf = _UnionFind(pids)
+    for sim, a, b, dim in pairs:
+        auto_th, _suggest_th = _dedupe_thresholds(dim)
+        if sim >= auto_th:
+            uf.union(a, b)
+
+    groups: dict[str, list[str]] = defaultdict(list)
+    for pid in pids:
+        groups[uf.find(pid)].append(pid)
+
+    auto_merged: list[dict[str, Any]] = []
+    for _root, members in groups.items():
+        if len(members) < 2:
+            continue
+        keep = canonical_id(members)
+        for other in members:
+            if other == keep:
+                continue
+            if dry_run:
+                auto_merged.append({"keep_id": keep, "merge_id": other, "dry_run": True})
+            else:
+                mr = merge_persons(keep, other)
+                if mr.get("ok"):
+                    auto_merged.append(
+                        {
+                            "keep_id": keep,
+                            "merge_id": other,
+                            "events_moved": mr.get("events_moved", 0),
+                        }
+                    )
+
+    if not dry_run and auto_merged:
+        _inv_face_cache()
+
+    with get_connection() as conn2:
+        rows2 = conn2.execute(
+            """
+            SELECT person_id, embedding_json, first_seen, seen_count
+            FROM anon_face_profiles
+            """
+        ).fetchall()
+
+    prof2: list[dict[str, Any]] = []
+    for r in rows2:
+        pid = str(r["person_id"] or "").strip()
+        raw = str(r["embedding_json"] or "").strip()
+        if not pid or not raw:
+            continue
+        try:
+            vec = json.loads(raw)
+            v = [float(x) for x in vec]
+        except Exception:
+            continue
+        if not isinstance(vec, list) or not v:
+            continue
+        prof2.append({"person_id": pid, "vec": v})
+
+    n2 = len(prof2)
+    first_seen2 = {}
+    seen_count2 = {}
+    for r in rows2:
+        pid = str(r["person_id"] or "").strip()
+        if pid:
+            first_seen2[pid] = str(r["first_seen"] or "")
+            seen_count2[pid] = int(r["seen_count"] or 0)
+
+    def canonical_id2(group: list[str]) -> str:
+        return min(
+            group,
+            key=lambda pid: (first_seen2.get(pid) or "9999", -seen_count2.get(pid, 0), pid),
+        )
+
+    suggestions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for i in range(n2):
+        for j in range(i + 1, n2):
+            vi, vj = prof2[i]["vec"], prof2[j]["vec"]
+            if len(vi) != len(vj):
+                continue
+            sim = _dot_normalized(vi, vj)
+            auto_th, suggest_th = _dedupe_thresholds(len(vi))
+            if suggest_th <= sim < auto_th:
+                a, b = prof2[i]["person_id"], prof2[j]["person_id"]
+                key = tuple(sorted((a, b)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                ka = canonical_id2([a, b])
+                mb = b if ka == a else a
+                suggestions.append(
+                    {
+                        "keep_id": ka,
+                        "merge_id": mb,
+                        "similarity": round(sim, 4),
+                    }
+                )
+
+    suggestions.sort(key=lambda x: -float(x["similarity"]))
+    suggestions = suggestions[:40]
+
+    if not dry_run:
+        invalidate_involvement_summary_cache()
+
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "profiles_scanned": n,
+        "profiles_after": n2,
+        "auto_merged": auto_merged,
+        "suggestions": suggestions,
+    }
+
+
 def payload_from_config(config: RetentionConfig) -> dict[str, Any]:
     return config.model_dump()
 

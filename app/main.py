@@ -58,6 +58,8 @@ from .retention import (
     validate_person,
     reject_person,
     merge_persons,
+    merge_selected_pairs,
+    reprocess_duplicate_profiles,
     wipe_all_test_data,
     request_reconciliation_run,
     request_system_update_run,
@@ -501,6 +503,42 @@ async def api_reject_person(request: Request) -> JSONResponse:
         return JSONResponse(content=result)
     except Exception as exc:
         logger.exception("Erro em /api/person/reject")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@app.post("/api/person/reprocess-duplicates")
+async def api_reprocess_duplicates(request: Request) -> JSONResponse:
+    try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        dry_run = bool(body.get("dry_run", False))
+        result = reprocess_duplicate_profiles(dry_run=dry_run)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.exception("Erro em /api/person/reprocess-duplicates")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@app.post("/api/person/merge-selected")
+async def api_merge_selected(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+        raw_pairs = body.get("pairs") or []
+        pairs: list[tuple[str, str]] = []
+        for item in raw_pairs:
+            if isinstance(item, dict):
+                k = str(item.get("keep_id", "")).strip()
+                m = str(item.get("merge_id", "")).strip()
+                if k and m:
+                    pairs.append((k, m))
+        if not pairs:
+            return JSONResponse(status_code=400, content={"error": "pairs obrigatorio (lista de {keep_id, merge_id})"})
+        result = merge_selected_pairs(pairs)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.exception("Erro em /api/person/merge-selected")
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
