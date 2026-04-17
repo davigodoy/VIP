@@ -295,10 +295,11 @@ def resolve_anonymous_person_id(face_bgr: np.ndarray) -> str | None:
 
     now_sql = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
-    logger.warning(
-        "ReID desc=%d best_sim=%.3f thr=%.3f match=%s profiles=%d",
-        desc.size, best_sim, threshold, best_pid if best_sim >= threshold else "NONE",
-        len(profiles),
+    import sys
+    print(
+        f"ReID desc={desc.size} best_sim={best_sim:.3f} thr={threshold:.3f} "
+        f"match={best_pid if best_sim >= threshold else 'NONE'} profiles={len(profiles)}",
+        file=sys.stderr, flush=True,
     )
 
     if best_pid and best_vec is not None and best_sim >= threshold:
