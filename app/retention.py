@@ -1301,7 +1301,9 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
             f"""
             SELECT temp_id AS person_id,
               COUNT(DISTINCT substr(event_ts, 1, 10)) AS visit_days,
-              MAX(event_ts) AS last_entrada
+              MAX(event_ts) AS last_entrada,
+              MAX(gender) AS gender,
+              MAX(age_band) AS age_band
             FROM events
             WHERE {_INVOLVEMENT_WHERE_ENTRADA}
             GROUP BY temp_id
@@ -1321,6 +1323,8 @@ def get_people_involvement(*, limit: int, offset: int) -> dict[str, Any]:
                 "visit_days": vd,
                 "envolvimento": band,
                 "last_entrada": r["last_entrada"],
+                "gender": r["gender"],
+                "age_band": r["age_band"],
             }
         )
 

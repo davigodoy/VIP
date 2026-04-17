@@ -2366,7 +2366,15 @@
             ? `<img src="${vipUrl('api/face-crop/' + encodeURIComponent(cropFile))}" alt="rosto" style="width:48px;height:auto;border-radius:4px;border:1px solid #ccc">`
             : '<span style="color:#999;font-size:0.8em">—</span>';
           const ePid = escHtml(pid);
-          return `<tr>
+          const g = p.gender || '';
+          const ab = p.age_band || '';
+          const gOpts = [['','Genero'],['homem','Homem'],['mulher','Mulher']].map(
+            ([v,l]) => `<option value="${v}"${v===g?' selected':''}>${l}</option>`
+          ).join('');
+          const aOpts = [['','Idade'],['crianca','Crianca'],['junior','Junior'],['adolescente','Adolescente'],['jovem','Jovem'],['adulto','Adulto'],['idoso','Idoso']].map(
+            ([v,l]) => `<option value="${v}"${v===ab?' selected':''}>${l}</option>`
+          ).join('');
+          return `<tr data-pid="${ePid}">
             <td data-label="Rosto">${img}</td>
             <td data-label="person_id"><code style="font-size:0.75em">${ePid}</code></td>
             <td data-label="Dias">${p.visit_days ?? '-'}</td>
@@ -2378,8 +2386,8 @@
                 <button type="button" class="btn-reject danger" title="Rejeitar">&#10007;</button>
               </div>
               <div class="validation-form" data-pid="${ePid}" style="display:none">
-                <select class="val-gender"><option value="">Genero</option><option value="homem">Homem</option><option value="mulher">Mulher</option></select>
-                <select class="val-age"><option value="">Idade</option><option value="crianca">Crianca</option><option value="junior">Junior</option><option value="adolescente">Adolescente</option><option value="jovem">Jovem</option><option value="adulto">Adulto</option><option value="idoso">Idoso</option></select>
+                <select class="val-gender">${gOpts}</select>
+                <select class="val-age">${aOpts}</select>
                 <button type="button" class="btn-confirm-val secondary" title="Confirmar">Salvar</button>
                 <button type="button" class="btn-cancel-val" title="Cancelar" style="font-size:0.8em">&#10007;</button>
               </div>
@@ -2419,7 +2427,8 @@
             const d = await r.json();
             if (d.ok) {
               showToast(`Rejeitado: ${d.events_deleted} evento(s) removido(s)`);
-              refreshEnvolvimento(involvementPage);
+              const row = btn.closest('tr');
+              if (row) row.remove();
             } else {
               showToast('Erro: ' + (d.error || 'falha'), true);
             }
@@ -2440,8 +2449,8 @@
             if (d.ok) {
               showToast(`Validado: ${d.events_updated} evento(s) atualizado(s)`);
               formDiv.style.display = 'none';
+              actionsDiv.innerHTML = '<span style="color:#16a34a;font-weight:600">&#10003;</span>';
               actionsDiv.style.display = 'flex';
-              refreshEnvolvimento(involvementPage);
             } else {
               showToast('Erro: ' + (d.error || 'falha'), true);
             }
