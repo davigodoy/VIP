@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from datetime import datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -501,6 +502,21 @@ def on_frame_bgr(frame: np.ndarray) -> None:
 
 
 
+_FACE_CROPS_DIR = Path(__file__).resolve().parent.parent / "data" / "face_crops"
+
+
+def _save_face_crop(pid: str, crop: np.ndarray) -> None:
+    """Salva crop do rosto como JPEG para validacao visual."""
+    try:
+        _FACE_CROPS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"{pid}_{ts}.jpg"
+        path = _FACE_CROPS_DIR / fname
+        cv2.imwrite(str(path), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    except Exception as exc:
+        logger.debug("Falha ao salvar face crop: %s", exc)
+
+
 def _resolve_reid_and_demographics(
     track_id: int, best_crop: np.ndarray, tr: dict[str, Any]
 ) -> None:
@@ -522,6 +538,8 @@ def _resolve_reid_and_demographics(
             tr["age_est"] = age_est
             if g in ("homem", "mulher"):
                 tr["gender_band"] = g
+
+        _save_face_crop(pid, best_crop)
 
     tr["person_id"] = pid
 

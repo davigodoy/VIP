@@ -7,6 +7,8 @@ from typing import Any
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pathlib import Path
+
 from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import (
     HTMLResponse,
@@ -258,6 +260,30 @@ async def api_detection_debug() -> JSONResponse:
         return JSONResponse(content=get_tracking_debug())
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@app.get("/api/face-crops")
+async def api_list_face_crops() -> JSONResponse:
+    crops_dir = Path(__file__).resolve().parent.parent / "data" / "face_crops"
+    if not crops_dir.is_dir():
+        return JSONResponse(content={"crops": []})
+    files = sorted(crops_dir.glob("*.jpg"), key=lambda f: f.stat().st_mtime, reverse=True)
+    crops = []
+    for f in files[:200]:
+        name = f.stem
+        parts = name.rsplit("_", 2)
+        pid = parts[0] if len(parts) >= 3 else name
+        crops.append({"filename": f.name, "person_id": pid, "size_kb": round(f.stat().st_size / 1024, 1)})
+    return JSONResponse(content={"crops": crops, "total": len(files)})
+
+
+@app.get("/api/face-crop/{filename}")
+async def api_get_face_crop(filename: str) -> Response:
+    crops_dir = Path(__file__).resolve().parent.parent / "data" / "face_crops"
+    path = crops_dir / filename
+    if not path.is_file() or not path.name.endswith(".jpg"):
+        raise HTTPException(status_code=404, detail="Crop nao encontrado")
+    return Response(content=path.read_bytes(), media_type="image/jpeg")
 
 
 @app.get("/api/camera/devices")

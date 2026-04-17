@@ -376,14 +376,15 @@
           <table>
             <thead>
               <tr>
+                <th>Rosto</th>
                 <th>person_id</th>
-                <th>Dias com entrada</th>
+                <th>Dias</th>
                 <th>Envolvimento</th>
                 <th>Ultima entrada</th>
               </tr>
             </thead>
             <tbody id="envolvimento-body">
-              <tr><td colspan="4">Carregando...</td></tr>
+              <tr><td colspan="5">Carregando...</td></tr>
             </tbody>
           </table>
         </div>
@@ -2346,17 +2347,31 @@
         }
         const rows = d.people || [];
         if (rows.length === 0) {
-          body.innerHTML = '<tr><td colspan="4">Nenhuma entrada na janela.</td></tr>';
+          body.innerHTML = '<tr><td colspan="5">Nenhuma entrada na janela.</td></tr>';
           return;
         }
-        body.innerHTML = rows.map((p) => `
-          <tr>
-            <td data-label="person_id"><code>${escHtml(p.person_id || '')}</code></td>
-            <td data-label="Dias com entrada">${p.visit_days ?? '-'}</td>
+        let cropsMap = {};
+        try {
+          const cropsRes = await fetch(vipUrl('api/face-crops'), { cache: 'no-store' });
+          const cropsData = await cropsRes.json();
+          for (const c of (cropsData.crops || [])) {
+            if (!cropsMap[c.person_id]) cropsMap[c.person_id] = c.filename;
+          }
+        } catch (_) {}
+        body.innerHTML = rows.map((p) => {
+          const pid = p.person_id || '';
+          const cropFile = cropsMap[pid];
+          const img = cropFile
+            ? `<img src="${vipUrl('api/face-crop/' + encodeURIComponent(cropFile))}" alt="rosto" style="width:48px;height:auto;border-radius:4px;border:1px solid #ccc">`
+            : '<span style="color:#999;font-size:0.8em">—</span>';
+          return `<tr>
+            <td data-label="Rosto">${img}</td>
+            <td data-label="person_id"><code style="font-size:0.75em">${escHtml(pid)}</code></td>
+            <td data-label="Dias">${p.visit_days ?? '-'}</td>
             <td data-label="Envolvimento">${escHtml(p.envolvimento ?? '')}</td>
             <td data-label="Ultima entrada">${escHtml(p.last_entrada ?? '')}</td>
-          </tr>
-        `).join('');
+          </tr>`;
+        }).join('');
       } catch (e) {
         body.innerHTML = '<tr><td colspan="4">Falha de rede ao carregar envolvimento</td></tr>';
       }
