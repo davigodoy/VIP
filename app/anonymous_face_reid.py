@@ -50,7 +50,7 @@ _EMA_ALPHA = 0.10
 _EMA_MIN_SEEN = 2
 
 # --- Thresholds por tipo de descriptor (cosine similarity via dot product) ---
-_THRESHOLD_SFACE = 0.363
+_THRESHOLD_SFACE = 0.30
 _THRESHOLD_DCT = 0.86
 
 # DCT params
