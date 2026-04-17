@@ -8,18 +8,6 @@
 </head>
 <body>
   <div id="vip-toast-host" class="vip-toast-host" aria-live="polite" aria-relevant="additions"></div>
-  <div id="vip-dedupe-modal" class="vip-modal" role="dialog" aria-modal="true" aria-labelledby="vip-dedupe-title" style="display:none">
-    <div class="vip-modal__backdrop" data-close-dedupe="1"></div>
-    <div class="vip-modal__panel">
-      <h3 id="vip-dedupe-title">Sugestoes de agrupamento</h3>
-      <p class="help" id="vip-dedupe-modal-summary"></p>
-      <div id="vip-dedupe-modal-list" class="vip-dedupe-list"></div>
-      <div class="vip-modal__actions">
-        <button type="button" id="vip-dedupe-apply-selected" class="secondary">Fundir selecionados</button>
-        <button type="button" id="vip-dedupe-close" class="secondary">Fechar</button>
-      </div>
-    </div>
-  </div>
   <main class="app-shell">
     <aside class="sidebar card">
       <h2>Sistema VIP</h2>
@@ -383,7 +371,7 @@
         <p class="help" id="envolvimento-resumo">Carregando resumo...</p>
         <div class="reconcile-actions">
           <button type="button" id="envolvimento-refresh" class="secondary">Atualizar lista</button>
-          <button type="button" id="envolvimento-reprocess-dedupe" class="secondary" title="Compara embeddings guardados; funde automaticamente os muito parecidos">Reprocessar duplicados</button>
+          <button type="button" id="envolvimento-reprocess-dedupe" class="secondary" title="Compara embeddings e funde duplicados; pergunta uma vez se houver casos duvidosos">Reprocessar duplicados</button>
         </div>
         <div class="table-wrap table-wrap--stack">
           <table>
@@ -2397,7 +2385,6 @@
               <div class="validation-actions" data-pid="${ePid}">
                 <button type="button" class="btn-approve secondary" title="Aprovar">&#10003;</button>
                 <button type="button" class="btn-reject danger" title="Rejeitar">&#10007;</button>
-                <button type="button" class="btn-merge secondary" title="Agrupar com outro perfil">&#8644;</button>
               </div>
               <div class="validation-form" data-pid="${ePid}" style="display:none">
                 <select class="val-gender">${gOpts}</select>
@@ -2413,11 +2400,9 @@
       }
     }
 
-    let _mergePendingPid = null;
-
     (function initValidationListeners() {
       document.addEventListener('click', async function(e) {
-        const btn = e.target.closest('.btn-approve, .btn-reject, .btn-confirm-val, .btn-cancel-val, .btn-merge');
+        const btn = e.target.closest('.btn-approve, .btn-reject, .btn-confirm-val, .btn-cancel-val');
         if (!btn) return;
         const cell = btn.closest('.validation-cell');
         if (!cell) return;
@@ -2425,49 +2410,6 @@
         const formDiv = cell.querySelector('.validation-form');
         const pid = actionsDiv?.dataset.pid;
         if (!pid) return;
-
-        if (btn.classList.contains('btn-merge')) {
-          if (!_mergePendingPid) {
-            _mergePendingPid = pid;
-            btn.style.background = '#f59e0b';
-            btn.textContent = '...';
-            showVipToast('Selecione o segundo perfil para agrupar', 'info');
-          } else if (_mergePendingPid === pid) {
-            _mergePendingPid = null;
-            btn.style.background = '';
-            btn.textContent = '\u21C4';
-            showVipToast('Merge cancelado', 'info');
-          } else {
-            const keep = _mergePendingPid;
-            const merge = pid;
-            if (!confirm(`Agrupar "${merge}" em "${keep}"?\nTodos os eventos de "${merge}" serao movidos para "${keep}".`)) {
-              _mergePendingPid = null;
-              document.querySelectorAll('.btn-merge').forEach(b => { b.style.background = ''; b.textContent = '\u21C4'; });
-              return;
-            }
-            btn.disabled = true;
-            try {
-              const r = await fetch(vipUrl('api/person/merge'), {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ keep_id: keep, merge_id: merge })
-              });
-              const d = await r.json();
-              if (d.ok) {
-                showVipToast(`Agrupado: ${d.events_moved} evento(s) movido(s) para ${keep}`);
-                const mergeRow = document.querySelector(`tr[data-pid="${merge}"]`);
-                if (mergeRow) mergeRow.remove();
-              } else {
-                showVipToast('Erro: ' + (d.error || 'falha'), 'error');
-              }
-            } catch (err) {
-              showVipToast('Erro de rede: ' + err.message, 'error');
-            }
-            _mergePendingPid = null;
-            document.querySelectorAll('.btn-merge').forEach(b => { b.style.background = ''; b.textContent = '\u21C4'; });
-            btn.disabled = false;
-          }
-          return;
-        }
 
         if (btn.classList.contains('btn-approve')) {
           actionsDiv.style.display = 'none';
@@ -2549,71 +2491,8 @@
     document.getElementById('envolvimento-prev')?.addEventListener('click', () => refreshEnvolvimento(involvementPage - 1));
     document.getElementById('envolvimento-next')?.addEventListener('click', () => refreshEnvolvimento(involvementPage + 1));
 
-    function closeDedupeModal() {
-      const m = document.getElementById('vip-dedupe-modal');
-      if (m) m.style.display = 'none';
-    }
-
-    function openDedupeModal(suggestions) {
-      const m = document.getElementById('vip-dedupe-modal');
-      const list = document.getElementById('vip-dedupe-modal-list');
-      const sum = document.getElementById('vip-dedupe-modal-summary');
-      if (!m || !list) return;
-      list.innerHTML = (suggestions || []).map((s) => {
-        const k = String(s.keep_id || '').replace(/"/g, '');
-        const mg = String(s.merge_id || '').replace(/"/g, '');
-        return `<label class="vip-dedupe-row">
-          <input type="checkbox" checked data-keep="${k}" data-merge="${mg}" />
-          <span>Similaridade ${Number(s.similarity)} — manter <code>${escHtml(k)}</code>, fundir <code>${escHtml(mg)}</code></span>
-        </label>`;
-      }).join('');
-      if (sum) {
-        sum.textContent = (suggestions || []).length + ' par(es) com similaridade moderada. Desmarque os que nao quiser fundir; depois use Fundir selecionados.';
-      }
-      m.style.display = 'flex';
-    }
-
-    document.getElementById('vip-dedupe-modal')?.addEventListener('click', (ev) => {
-      if (ev.target && ev.target.getAttribute('data-close-dedupe')) closeDedupeModal();
-    });
-    document.getElementById('vip-dedupe-close')?.addEventListener('click', closeDedupeModal);
-
-    document.getElementById('vip-dedupe-apply-selected')?.addEventListener('click', async () => {
-      const list = document.querySelectorAll('#vip-dedupe-modal-list input[type=checkbox]:checked');
-      const pairs = [];
-      list.forEach((cb) => {
-        pairs.push({ keep_id: cb.getAttribute('data-keep'), merge_id: cb.getAttribute('data-merge') });
-      });
-      if (!pairs.length) {
-        closeDedupeModal();
-        return;
-      }
-      const btn = document.getElementById('vip-dedupe-apply-selected');
-      if (btn) btn.disabled = true;
-      try {
-        const r = await fetch(vipUrl('api/person/merge-selected'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pairs }),
-        });
-        const d = await r.json();
-        const merged = (d.merged || []).length;
-        const errs = d.errors || [];
-        if (errs.length) {
-          showVipToast('Parcial: ' + merged + ' ok, ' + errs.length + ' erro(s).', 'error');
-        } else {
-          showVipToast('Fundidos: ' + merged + ' par(es).');
-          closeDedupeModal();
-        }
-        refreshEnvolvimento(1);
-      } catch (e) {
-        showVipToast('Erro de rede: ' + e.message, 'error');
-      }
-      if (btn) btn.disabled = false;
-    });
-
     document.getElementById('envolvimento-reprocess-dedupe')?.addEventListener('click', async () => {
-      if (!confirm('Reprocessar perfis anonimos por similaridade de embedding?\n\nFusoes muito confiantes serao aplicadas automaticamente.\nPares duvidosos aparecerao numa lista para confirmacao.')) return;
+      if (!confirm('Reprocessar duplicados?\n\nPerfis muito parecidos serao fundidos automaticamente.\nSe houver casos duvidosos, serao perguntados de uma vez.')) return;
       const btn = document.getElementById('envolvimento-reprocess-dedupe');
       if (btn) btn.disabled = true;
       try {
@@ -2629,9 +2508,29 @@
         }
         const nAuto = (d.auto_merged || []).length;
         const sug = d.suggestions || [];
-        showVipToast('Reprocessado: ' + nAuto + ' fusao(oes) automatica(s), ' + sug.length + ' sugestao(oes).', sug.length ? 'info' : 'success');
+        if (sug.length > 0) {
+          const msg = 'Foram encontrados ' + sug.length + ' par(es) com similaridade moderada (pode ser a mesma pessoa em angulos diferentes).\n\nFundir todos agora? O perfil mais antigo em cada par e mantido.';
+          if (confirm(msg)) {
+            const r2 = await fetch(vipUrl('api/person/merge-selected'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pairs: sug }),
+            });
+            const d2 = await r2.json();
+            const merged = (d2.merged || []).length;
+            const errs = d2.errors || [];
+            if (errs.length) {
+              showVipToast('Fusoes duvidosas: ' + merged + ' ok, ' + errs.length + ' erro(s).', 'error');
+            } else {
+              showVipToast('Automatico: ' + nAuto + ' fusao(oes). Duvidosos: ' + merged + ' fusao(oes).', 'success');
+            }
+          } else {
+            showVipToast('Automatico: ' + nAuto + ' fusao(oes). Duvidosos: ignorados.', 'info');
+          }
+        } else {
+          showVipToast(nAuto ? ('Fundidos automaticamente: ' + nAuto + ' grupo(s).') : 'Nenhum duplicado encontrado.', 'success');
+        }
         refreshEnvolvimento(1);
-        if (sug.length > 0) openDedupeModal(sug);
       } catch (e) {
         showVipToast('Erro de rede: ' + e.message, 'error');
       }

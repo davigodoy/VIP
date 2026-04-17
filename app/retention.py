@@ -636,12 +636,12 @@ def _dot_normalized(a: list[float], b: list[float]) -> float:
 
 
 def _dedupe_thresholds(dim: int) -> tuple[float, float]:
-    """Retorna (limiar_auto, limiar_sugestao) para similaridade cosseno em vetores ja L2-normalizados."""
+    """Retorna (limiar_auto, limiar_sugestao): >= auto funde sem perguntar; [sugestao, auto) pergunta uma vez em batch."""
     if dim == 128:
-        return (0.46, 0.34)
+        return (0.42, 0.30)
     if dim == 400:
-        return (0.89, 0.80)
-    return (0.50, 0.40)
+        return (0.87, 0.78)
+    return (0.48, 0.36)
 
 
 class _UnionFind:
