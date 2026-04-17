@@ -538,10 +538,14 @@ def _resolve_reid_and_demographics(
     want_age = bool(cfg.estimar_faixa_etaria)
     want_gender = bool(cfg.estimar_genero)
 
+    ch, cw = best_crop.shape[:2] if best_crop is not None else (0, 0)
+
     if HAS_CV2 and cv2 is not None:
         anon_id = resolve_anonymous_person_id(best_crop)
         if anon_id:
             pid = anon_id
+        else:
+            logger.warning("ReID falhou tid=%d crop=%dx%d", track_id, cw, ch)
 
         if want_age or want_gender:
             age_est, g = estimate_demographics_from_face(
@@ -550,6 +554,7 @@ def _resolve_reid_and_demographics(
             tr["age_est"] = age_est
             if g in ("homem", "mulher"):
                 tr["gender_band"] = g
+            logger.warning("Demo tid=%d crop=%dx%d age=%s gender=%s", track_id, cw, ch, age_est, g)
 
     tr["person_id"] = pid
 
