@@ -56,7 +56,7 @@ _THRESHOLD_DCT = 0.86
 # DCT params
 _DCT_BLOCK = 20
 _DESC_RESIZE = 64
-_MIN_FACE_PX = 30
+_MIN_FACE_PX = 60
 
 # --- SFace singleton ---
 _sface: Any | None = None
@@ -294,6 +294,12 @@ def resolve_anonymous_person_id(face_bgr: np.ndarray) -> str | None:
             best_seen = seen
 
     now_sql = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+    logger.warning(
+        "ReID desc=%d best_sim=%.3f thr=%.3f match=%s profiles=%d",
+        desc.size, best_sim, threshold, best_pid if best_sim >= threshold else "NONE",
+        len(profiles),
+    )
 
     if best_pid and best_vec is not None and best_sim >= threshold:
         if best_seen >= _EMA_MIN_SEEN:

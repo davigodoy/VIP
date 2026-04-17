@@ -92,7 +92,7 @@ _YUNET_MAX_W_RATIO = 0.70
 _YUNET_MAX_H_RATIO = 0.80
 
 _FACE_PAD_RATIO = 0.45
-_MIN_CROP_PX = 20
+_MIN_CROP_PX = 56
 
 
 def _iou_xywh(
