@@ -8,6 +8,18 @@
 </head>
 <body>
   <div id="vip-toast-host" class="vip-toast-host" aria-live="polite" aria-relevant="additions"></div>
+  <div id="vip-dedupe-review-modal" class="vip-modal" role="dialog" aria-modal="true" aria-labelledby="vip-dedupe-review-title" style="display:none">
+    <div class="vip-modal__backdrop" data-close-dedupe-review="1"></div>
+    <div class="vip-modal__panel vip-dedupe-review-panel">
+      <h3 id="vip-dedupe-review-title">Possiveis duplicados (revisar)</h3>
+      <p class="help" id="vip-dedupe-review-intro"></p>
+      <div id="vip-dedupe-review-list" class="vip-dedupe-review-list"></div>
+      <div class="vip-modal__actions">
+        <button type="button" id="vip-dedupe-review-apply" class="secondary">Fundir os marcados</button>
+        <button type="button" id="vip-dedupe-review-cancel" class="secondary">Cancelar</button>
+      </div>
+    </div>
+  </div>
   <main class="app-shell">
     <aside class="sidebar card">
       <h2>Sistema VIP</h2>
@@ -2491,8 +2503,95 @@
     document.getElementById('envolvimento-prev')?.addEventListener('click', () => refreshEnvolvimento(involvementPage - 1));
     document.getElementById('envolvimento-next')?.addEventListener('click', () => refreshEnvolvimento(involvementPage + 1));
 
+    function closeDedupeReviewModal() {
+      const m = document.getElementById('vip-dedupe-review-modal');
+      if (m) m.style.display = 'none';
+    }
+
+    /**
+     * Mostra pares duvidosos com miniaturas dos rostos guardados.
+     * @returns {Promise<null|Array<{keep_id:string,merge_id:string}>>} null=cancelou, []=confirmou sem marcar nada
+     */
+    function openDedupeReviewModalAndGetPairs(suggestions) {
+      return new Promise((resolve) => {
+        const m = document.getElementById('vip-dedupe-review-modal');
+        const listEl = document.getElementById('vip-dedupe-review-list');
+        const intro = document.getElementById('vip-dedupe-review-intro');
+        const applyBtn = document.getElementById('vip-dedupe-review-apply');
+        const cancelBtn = document.getElementById('vip-dedupe-review-cancel');
+        const backdrop = m?.querySelector('.vip-modal__backdrop');
+        if (!m || !listEl || !applyBtn || !cancelBtn) {
+          resolve(null);
+          return;
+        }
+
+        const finish = (pairs) => {
+          closeDedupeReviewModal();
+          applyBtn.onclick = null;
+          cancelBtn.onclick = null;
+          if (backdrop) backdrop.onclick = null;
+          resolve(pairs);
+        };
+
+        (async () => {
+          try {
+          const cropsMap = {};
+          try {
+            const cr = await fetch(vipUrl('api/face-crops'), { cache: 'no-store' });
+            const cd = await cr.json();
+            for (const c of (cd.crops || [])) {
+              if (c.person_id && !cropsMap[c.person_id]) cropsMap[c.person_id] = c.filename;
+            }
+          } catch (_) {}
+
+          const faceCol = (label, pid) => {
+            const fn = cropsMap[pid];
+            const img = fn
+              ? `<img src="${vipUrl('api/face-crop/' + encodeURIComponent(fn))}" alt="" loading="lazy" />`
+              : '<span class="help">Sem crop guardado</span>';
+            return `<div class="vip-dedupe-review-face"><div class="vip-dedupe-review-face-label">${label}</div>${img}<div class="vip-dedupe-review-caption"><code>${escHtml(pid)}</code></div></div>`;
+          };
+
+          listEl.innerHTML = (suggestions || []).map((s) => {
+            const k = String(s.keep_id || '').replace(/"/g, '');
+            const mg = String(s.merge_id || '').replace(/"/g, '');
+            return `<div class="vip-dedupe-review-row">
+              <input type="checkbox" checked data-keep="${k}" data-merge="${mg}" title="Incluir na fusao" />
+              <div class="vip-dedupe-review-body">
+                <div class="vip-dedupe-review-pair">
+                  ${faceCol('Manter (mais antigo)', k)}
+                  ${faceCol('Fundir em cima', mg)}
+                </div>
+                <div class="vip-dedupe-review-meta">Similaridade ~${Number(s.similarity)} (cosseno entre embeddings)</div>
+              </div>
+            </div>`;
+          }).join('');
+
+          if (intro) {
+            intro.textContent = 'Estes pares tem similaridade moderada: pode ser a mesma pessoa (ex.: angulos diferentes) ou nao. Veja os rostos e desmarque os que nao devem ser fundidos. Depois use "Fundir os marcados".';
+          }
+
+          applyBtn.onclick = () => {
+            const pairs = [];
+            listEl.querySelectorAll('input[type=checkbox]:checked').forEach((cb) => {
+              pairs.push({ keep_id: cb.getAttribute('data-keep'), merge_id: cb.getAttribute('data-merge') });
+            });
+            finish(pairs);
+          };
+          cancelBtn.onclick = () => finish(null);
+          if (backdrop) backdrop.onclick = () => finish(null);
+
+          m.style.display = 'flex';
+          } catch (e) {
+            showVipToast('Erro ao abrir revisao: ' + e.message, 'error');
+            finish(null);
+          }
+        })();
+      });
+    }
+
     document.getElementById('envolvimento-reprocess-dedupe')?.addEventListener('click', async () => {
-      if (!confirm('Reprocessar duplicados?\n\nPerfis muito parecidos serao fundidos automaticamente.\nSe houver casos duvidosos, serao perguntados de uma vez.')) return;
+      if (!confirm('Reprocessar duplicados?\n\nPerfis muito parecidos serao fundidos automaticamente.\nSe houver casos duvidosos, abre-se uma janela com os rostos para revisar.')) return;
       const btn = document.getElementById('envolvimento-reprocess-dedupe');
       if (btn) btn.disabled = true;
       try {
@@ -2509,23 +2608,25 @@
         const nAuto = (d.auto_merged || []).length;
         const sug = d.suggestions || [];
         if (sug.length > 0) {
-          const msg = 'Foram encontrados ' + sug.length + ' par(es) com similaridade moderada (pode ser a mesma pessoa em angulos diferentes).\n\nFundir todos agora? O perfil mais antigo em cada par e mantido.';
-          if (confirm(msg)) {
+          const pairsToMerge = await openDedupeReviewModalAndGetPairs(sug);
+          if (pairsToMerge === null) {
+            showVipToast('Automatico: ' + nAuto + ' fusao(oes). Revisao cancelada.', 'info');
+          } else if (pairsToMerge.length > 0) {
             const r2 = await fetch(vipUrl('api/person/merge-selected'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pairs: sug }),
+              body: JSON.stringify({ pairs: pairsToMerge }),
             });
             const d2 = await r2.json();
             const merged = (d2.merged || []).length;
             const errs = d2.errors || [];
             if (errs.length) {
-              showVipToast('Fusoes duvidosas: ' + merged + ' ok, ' + errs.length + ' erro(s).', 'error');
+              showVipToast('Revisao: ' + merged + ' ok, ' + errs.length + ' erro(s).', 'error');
             } else {
-              showVipToast('Automatico: ' + nAuto + ' fusao(oes). Duvidosos: ' + merged + ' fusao(oes).', 'success');
+              showVipToast('Automatico: ' + nAuto + ' fusao(oes). Revisao: ' + merged + ' fusao(oes).', 'success');
             }
           } else {
-            showVipToast('Automatico: ' + nAuto + ' fusao(oes). Duvidosos: ignorados.', 'info');
+            showVipToast('Automatico: ' + nAuto + ' fusao(oes). Nenhum par duvidoso marcado para fundir.', 'info');
           }
         } else {
           showVipToast(nAuto ? ('Fundidos automaticamente: ' + nAuto + ' grupo(s).') : 'Nenhum duplicado encontrado.', 'success');
