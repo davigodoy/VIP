@@ -93,10 +93,6 @@ _YUNET_MAX_H_RATIO = 0.80
 _FACE_PAD_RATIO = 0.45
 _MIN_CROP_PX = 20
 
-_diag_frame_count = 0
-_diag_detect_count = 0
-_diag_last_log = 0.0
-
 
 def _iou_xywh(
     a: tuple[float, float, float, float], b: tuple[float, float, float, float]
@@ -204,23 +200,13 @@ def _detect_faces_yunet(
     max_w = int(max(1, img_w * _YUNET_MAX_W_RATIO))
     max_h = int(max(1, img_h * _YUNET_MAX_H_RATIO))
     result: list[list[int]] = []
-    filtered_small = 0
-    filtered_big = 0
     for face in faces:
         x, y, w, h = int(face[0]), int(face[1]), int(face[2]), int(face[3])
-        score = float(face[14]) if len(face) > 14 else -1.0
         if w < _HAAR_MIN_W or h < _HAAR_MIN_H:
-            filtered_small += 1
             continue
         if w > max_w or h > max_h:
-            filtered_big += 1
             continue
         result.append([x, y, w, h])
-    if len(faces) > 0 and len(result) == 0:
-        logger.warning(
-            "YuNet raw=%d filtered(small=%d big=%d) img=%dx%d",
-            len(faces), filtered_small, filtered_big, img_w, img_h,
-        )
     return result
 
 
@@ -334,20 +320,6 @@ def on_frame_bgr(frame: np.ndarray) -> None:
         detections.append(
             (cx, cy, float(max(wi, hi)), float(xi), float(yi), float(wi), float(hi))
         )
-
-    global _diag_frame_count, _diag_detect_count, _diag_last_log
-    _diag_frame_count += 1
-    _diag_detect_count += len(detections)
-    now_mono = monotonic()
-    if now_mono - _diag_last_log > 10.0:
-        logger.warning(
-            "DIAG frames=%d det=%d tracks=%d ring=%d raw=%dx%d->%dx%d (10s)",
-            _diag_frame_count, _diag_detect_count, len(_tracks), len(_exit_ring),
-            w, h, small_w, small_h,
-        )
-        _diag_frame_count = 0
-        _diag_detect_count = 0
-        _diag_last_log = now_mono
 
     with _state_lock:
         _prune_exit_ring(monotonic())
@@ -538,14 +510,10 @@ def _resolve_reid_and_demographics(
     want_age = bool(cfg.estimar_faixa_etaria)
     want_gender = bool(cfg.estimar_genero)
 
-    ch, cw = best_crop.shape[:2] if best_crop is not None else (0, 0)
-
     if HAS_CV2 and cv2 is not None:
         anon_id = resolve_anonymous_person_id(best_crop)
         if anon_id:
             pid = anon_id
-        else:
-            logger.warning("ReID falhou tid=%d crop=%dx%d", track_id, cw, ch)
 
         if want_age or want_gender:
             age_est, g = estimate_demographics_from_face(
@@ -554,7 +522,6 @@ def _resolve_reid_and_demographics(
             tr["age_est"] = age_est
             if g in ("homem", "mulher"):
                 tr["gender_band"] = g
-            logger.warning("Demo tid=%d crop=%dx%d age=%s gender=%s", track_id, cw, ch, age_est, g)
 
     tr["person_id"] = pid
 
