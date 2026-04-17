@@ -274,7 +274,7 @@ def estimate_demographics_from_face(
     _try_load_dnn_nets(want_age=want_age, want_gender=want_gender)
 
     h, w = face_bgr.shape[:2]
-    if max(h, w) < 36:
+    if min(h, w) < 50:
         return None, None
 
     return _run_dnn_inference(face_bgr, want_age=want_age, want_gender=want_gender)
