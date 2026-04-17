@@ -445,6 +445,53 @@ button.danger {
   background: #b91c1c;
 }
 
+.validation-cell .validation-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.validation-cell .validation-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.validation-cell .validation-form select {
+  padding: 4px 6px;
+  font-size: 0.8em;
+  border-radius: 5px;
+  border: 1px solid #d1d5db;
+  max-width: 110px;
+}
+
+.validation-cell .btn-approve,
+.validation-cell .btn-reject {
+  padding: 4px 10px;
+  font-size: 1em;
+  min-height: auto;
+  line-height: 1;
+}
+
+.validation-cell .btn-approve {
+  background: #16a34a;
+  color: #fff;
+}
+
+.validation-cell .btn-confirm-val {
+  padding: 4px 10px;
+  font-size: 0.8em;
+  min-height: auto;
+}
+
+.validation-cell .btn-cancel-val {
+  background: transparent;
+  color: #6b7280;
+  padding: 4px 6px;
+  min-height: auto;
+}
+
 .cleanup-actions {
   display: flex;
   gap: 10px;

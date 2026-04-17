@@ -55,6 +55,8 @@ from .retention import (
     list_schedules,
     load_config,
     reset_identified_personas,
+    validate_person,
+    reject_person,
     wipe_all_test_data,
     request_reconciliation_run,
     request_system_update_run,
@@ -468,6 +470,36 @@ async def api_wipe_all_data() -> JSONResponse:
         return JSONResponse(content=result)
     except Exception as exc:
         logger.exception("Erro em /api/data/wipe")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@app.post("/api/person/validate")
+async def api_validate_person(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+        pid = str(body.get("person_id", "")).strip()
+        if not pid:
+            return JSONResponse(status_code=400, content={"error": "person_id obrigatorio"})
+        gender = body.get("gender")
+        age_band = body.get("age_band")
+        result = validate_person(pid, gender, age_band)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.exception("Erro em /api/person/validate")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@app.post("/api/person/reject")
+async def api_reject_person(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+        pid = str(body.get("person_id", "")).strip()
+        if not pid:
+            return JSONResponse(status_code=400, content={"error": "person_id obrigatorio"})
+        result = reject_person(pid)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.exception("Erro em /api/person/reject")
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 

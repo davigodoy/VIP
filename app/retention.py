@@ -510,6 +510,55 @@ def wipe_all_test_data() -> dict[str, Any]:
     return {"ok": True, "deleted": counts}
 
 
+def validate_person(person_id: str, gender: str | None, age_band: str | None) -> dict[str, Any]:
+    """Valida eventos de um person_id: marca como validado e corrige genero/idade se fornecidos."""
+    with get_connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE temp_id = ?", (person_id,)
+        ).fetchone()[0]
+        if count == 0:
+            return {"ok": False, "error": "person_id nao encontrado"}
+        updates = []
+        params: list[Any] = []
+        if gender and gender in ("homem", "mulher"):
+            updates.append("gender = ?")
+            params.append(gender)
+        if age_band:
+            updates.append("age_band = ?")
+            params.append(age_band)
+        if updates:
+            params.append(person_id)
+            conn.execute(
+                f"UPDATE events SET {', '.join(updates)} WHERE temp_id = ?",
+                params,
+            )
+            conn.commit()
+    invalidate_involvement_summary_cache()
+    return {"ok": True, "person_id": person_id, "events_updated": int(count)}
+
+
+def reject_person(person_id: str) -> dict[str, Any]:
+    """Rejeita um person_id: apaga todos os eventos e o perfil anonimo associado."""
+    with get_connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE temp_id = ?", (person_id,)
+        ).fetchone()[0]
+        conn.execute("DELETE FROM events WHERE temp_id = ?", (person_id,))
+        conn.execute("DELETE FROM anon_face_profiles WHERE person_id = ?", (person_id,))
+        conn.commit()
+    invalidate_involvement_summary_cache()
+    crops_dir = Path(__file__).resolve().parent.parent / "data" / "face_crops"
+    crops_removed = 0
+    if crops_dir.is_dir():
+        for f in crops_dir.glob(f"{person_id}_*.jpg"):
+            try:
+                f.unlink()
+                crops_removed += 1
+            except Exception:
+                pass
+    return {"ok": True, "person_id": person_id, "events_deleted": int(count), "crops_removed": crops_removed}
+
+
 def payload_from_config(config: RetentionConfig) -> dict[str, Any]:
     return config.model_dump()
 

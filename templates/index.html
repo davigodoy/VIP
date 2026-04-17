@@ -381,10 +381,11 @@
                 <th>Dias</th>
                 <th>Envolvimento</th>
                 <th>Ultima entrada</th>
+                <th>Validacao</th>
               </tr>
             </thead>
             <tbody id="envolvimento-body">
-              <tr><td colspan="5">Carregando...</td></tr>
+              <tr><td colspan="6">Carregando...</td></tr>
             </tbody>
           </table>
         </div>
@@ -2364,18 +2365,93 @@
           const img = cropFile
             ? `<img src="${vipUrl('api/face-crop/' + encodeURIComponent(cropFile))}" alt="rosto" style="width:48px;height:auto;border-radius:4px;border:1px solid #ccc">`
             : '<span style="color:#999;font-size:0.8em">—</span>';
+          const ePid = escHtml(pid);
           return `<tr>
             <td data-label="Rosto">${img}</td>
-            <td data-label="person_id"><code style="font-size:0.75em">${escHtml(pid)}</code></td>
+            <td data-label="person_id"><code style="font-size:0.75em">${ePid}</code></td>
             <td data-label="Dias">${p.visit_days ?? '-'}</td>
             <td data-label="Envolvimento">${escHtml(p.envolvimento ?? '')}</td>
             <td data-label="Ultima entrada">${escHtml(p.last_entrada ?? '')}</td>
+            <td data-label="Validacao" class="validation-cell">
+              <div class="validation-actions" data-pid="${ePid}">
+                <button type="button" class="btn-approve secondary" title="Aprovar">&#10003;</button>
+                <button type="button" class="btn-reject danger" title="Rejeitar">&#10007;</button>
+              </div>
+              <div class="validation-form" data-pid="${ePid}" style="display:none">
+                <select class="val-gender"><option value="">Genero</option><option value="homem">Homem</option><option value="mulher">Mulher</option></select>
+                <select class="val-age"><option value="">Idade</option><option value="crianca">Crianca</option><option value="junior">Junior</option><option value="adolescente">Adolescente</option><option value="jovem">Jovem</option><option value="adulto">Adulto</option><option value="idoso">Idoso</option></select>
+                <button type="button" class="btn-confirm-val secondary" title="Confirmar">Salvar</button>
+                <button type="button" class="btn-cancel-val" title="Cancelar" style="font-size:0.8em">&#10007;</button>
+              </div>
+            </td>
           </tr>`;
         }).join('');
       } catch (e) {
-        body.innerHTML = '<tr><td colspan="4">Falha de rede ao carregar envolvimento</td></tr>';
+        body.innerHTML = '<tr><td colspan="6">Falha de rede ao carregar envolvimento</td></tr>';
       }
     }
+
+    (function initValidationListeners() {
+      document.addEventListener('click', async function(e) {
+        const btn = e.target.closest('.btn-approve, .btn-reject, .btn-confirm-val, .btn-cancel-val');
+        if (!btn) return;
+        const cell = btn.closest('.validation-cell');
+        if (!cell) return;
+        const actionsDiv = cell.querySelector('.validation-actions');
+        const formDiv = cell.querySelector('.validation-form');
+        const pid = actionsDiv?.dataset.pid;
+        if (!pid) return;
+
+        if (btn.classList.contains('btn-approve')) {
+          actionsDiv.style.display = 'none';
+          formDiv.style.display = 'flex';
+        } else if (btn.classList.contains('btn-cancel-val')) {
+          formDiv.style.display = 'none';
+          actionsDiv.style.display = 'flex';
+        } else if (btn.classList.contains('btn-reject')) {
+          if (!confirm(`Rejeitar "${pid}"? Todos os eventos e dados serao apagados.`)) return;
+          btn.disabled = true;
+          try {
+            const r = await fetch(vipUrl('api/person/reject'), {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ person_id: pid })
+            });
+            const d = await r.json();
+            if (d.ok) {
+              showToast(`Rejeitado: ${d.events_deleted} evento(s) removido(s)`);
+              refreshEnvolvimento(involvementPage);
+            } else {
+              showToast('Erro: ' + (d.error || 'falha'), true);
+            }
+          } catch (err) {
+            showToast('Erro de rede: ' + err.message, true);
+          }
+          btn.disabled = false;
+        } else if (btn.classList.contains('btn-confirm-val')) {
+          const gender = formDiv.querySelector('.val-gender')?.value || null;
+          const ageBand = formDiv.querySelector('.val-age')?.value || null;
+          btn.disabled = true;
+          try {
+            const r = await fetch(vipUrl('api/person/validate'), {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ person_id: pid, gender: gender || undefined, age_band: ageBand || undefined })
+            });
+            const d = await r.json();
+            if (d.ok) {
+              showToast(`Validado: ${d.events_updated} evento(s) atualizado(s)`);
+              formDiv.style.display = 'none';
+              actionsDiv.style.display = 'flex';
+              refreshEnvolvimento(involvementPage);
+            } else {
+              showToast('Erro: ' + (d.error || 'falha'), true);
+            }
+          } catch (err) {
+            showToast('Erro de rede: ' + err.message, true);
+          }
+          btn.disabled = false;
+        }
+      });
+    })();
 
     function initCleanupHistoryPager() {
       const body = document.getElementById('cleanup-runs-body');
