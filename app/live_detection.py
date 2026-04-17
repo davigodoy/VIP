@@ -86,7 +86,7 @@ _HAAR_MAX_W_RATIO = 0.70
 _HAAR_MAX_H_RATIO = 0.80
 
 # YuNet params — threshold baixo para rostos em angulo (rampa, perfil 3/4)
-_YUNET_SCORE_THRESHOLD = 0.45
+_YUNET_SCORE_THRESHOLD = 0.60
 _YUNET_NMS_THRESHOLD = 0.3
 _YUNET_MAX_W_RATIO = 0.70
 _YUNET_MAX_H_RATIO = 0.80
@@ -524,16 +524,19 @@ def _verify_face_in_crop(crop: np.ndarray) -> bool:
     h, w = crop.shape[:2]
     if h < 30 or w < 30:
         return False
-    yunet = _get_yunet(w, h)
-    if yunet is None:
-        return True
     try:
-        old_size = yunet.getInputSize() if hasattr(yunet, "getInputSize") else None
-        yunet.setInputSize((w, h))
-        _, faces = yunet.detect(crop)
-        if old_size is not None:
-            yunet.setInputSize(old_size)
-        return faces is not None and len(faces) > 0
+        yunet_model = _MODEL_DIR / "face_detection_yunet_2023mar.onnx"
+        if not yunet_model.is_file() or not hasattr(cv2, "FaceDetectorYN"):
+            return True
+        verifier = cv2.FaceDetectorYN.create(
+            str(yunet_model), "", (w, h),
+            score_threshold=0.5, nms_threshold=0.3,
+        )
+        _, faces = verifier.detect(crop)
+        import sys
+        ok = faces is not None and len(faces) > 0
+        print(f"VERIFY crop={w}x{h} faces={'yes' if ok else 'NO'}", file=sys.stderr, flush=True)
+        return ok
     except Exception:
         return True
 
