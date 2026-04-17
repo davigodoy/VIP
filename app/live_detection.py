@@ -517,10 +517,35 @@ def _save_face_crop(pid: str, crop: np.ndarray) -> None:
         logger.debug("Falha ao salvar face crop: %s", exc)
 
 
+def _verify_face_in_crop(crop: np.ndarray) -> bool:
+    """Confirma que o crop realmente contém um rosto (reduz falsos positivos do YuNet)."""
+    if not HAS_CV2 or cv2 is None:
+        return True
+    h, w = crop.shape[:2]
+    if h < 30 or w < 30:
+        return False
+    yunet = _get_yunet(w, h)
+    if yunet is None:
+        return True
+    try:
+        old_size = yunet.getInputSize() if hasattr(yunet, "getInputSize") else None
+        yunet.setInputSize((w, h))
+        _, faces = yunet.detect(crop)
+        if old_size is not None:
+            yunet.setInputSize(old_size)
+        return faces is not None and len(faces) > 0
+    except Exception:
+        return True
+
+
 def _resolve_reid_and_demographics(
     track_id: int, best_crop: np.ndarray, tr: dict[str, Any]
 ) -> None:
     """Executa re-ID e demographics no crop; armazena resultado no track dict."""
+    if not _verify_face_in_crop(best_crop):
+        tr["person_id"] = None
+        return
+
     pid = f"face_{track_id}"
     cfg = load_config()
     want_age = bool(cfg.estimar_faixa_etaria)
@@ -568,6 +593,9 @@ def _emit_directional_event(tid: int, tr: dict[str, Any]) -> None:
     """
     if tr.get("event_emitted"):
         logger.debug("Track %d reutilizado, evento ja emitido — skip", tid)
+        return
+
+    if tr.get("person_id") is None and tr.get("reid_done"):
         return
 
     dx = tr["cx"] - tr.get("start_cx", tr["cx"])
