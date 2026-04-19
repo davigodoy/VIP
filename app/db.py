@@ -280,6 +280,7 @@ def _migrate_service_event_people_culto_pk(conn: sqlite3.Connection) -> None:
         return
     conn.executescript(
         """
+        DROP TABLE IF EXISTS service_event_people__v2;
         CREATE TABLE service_event_people__v2 (
             culto_id TEXT NOT NULL,
             person_id TEXT NOT NULL,
