@@ -781,10 +781,11 @@
       reconcile: { rows: [], page: 1, size: RUNS_PAGE_SIZE },
       cleanup: { rows: [], page: 1, size: RUNS_PAGE_SIZE },
     };
+    const INVOLVEMENT_PAGE_SIZE = 10;
     let involvementPage = 1;
 
     function getInvolvementPageSize() {
-      return window.matchMedia('(max-width: 768px)').matches ? 10 : 20;
+      return INVOLVEMENT_PAGE_SIZE;
     }
 
     function compactCell(text, maxLen = 120) {

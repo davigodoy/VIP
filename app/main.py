@@ -570,7 +570,7 @@ async def api_live_metrics(
 
 @app.get("/api/people/involvement")
 async def api_people_involvement(
-    limit: int = Query(default=200, ge=1, le=2000),
+    limit: int = Query(default=10, ge=1, le=2000),
     offset: int = Query(default=0, ge=0, le=500_000),
 ) -> JSONResponse:
     try:
